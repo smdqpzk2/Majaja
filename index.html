@@ -261,10 +261,21 @@
                 </div>
 
                 <div id="p2p-panel" style="display: none; flex-direction: column; gap:4px; border-top:1px solid rgba(255,255,255,0.1); padding-top:6px;">
-                    <div style="font-size:0.7rem; color:var(--gold-accent);">房號 ID: <span id="my-id" style="color:#fff;">生成中...</span></div>
+                    <div style="font-size:0.7rem; color:var(--gold-accent);">
+                        自訂房間 ID：
+                        <input type="text" id="room-id" maxlength="32"
+                            placeholder="例如 MyRoom123"
+                            style="background:#000; border:1px solid var(--panel-border); color:#fff; padding:4px; font-size:0.75rem; border-radius:4px; width:150px;">
+                        <button class="mode-btn" style="background:var(--gold-accent); color:#000; font-weight:bold;" onclick="createRoom()">建立房間</button>
+                    </div>
                     <div style="display:flex; gap:4px;">
-                        <input type="text" id="join-id" placeholder="貼上對手 ID" style="background:#000; border:1px solid var(--panel-border); color:#fff; padding:4px; font-size:0.75rem; border-radius:4px; flex:1;">
-                        <button class="mode-btn" style="background:var(--gold-accent); color:#000; font-weight:bold;" onclick="connectToPeer()">連線</button>
+                        <input type="text" id="join-id" maxlength="32"
+                            placeholder="輸入對手房間 ID"
+                            style="background:#000; border:1px solid var(--panel-border); color:#fff; padding:4px; font-size:0.75rem; border-radius:4px; flex:1;">
+                        <button class="mode-btn" style="background:var(--gold-accent); color:#000; font-weight:bold;" onclick="connectToPeer()">加入房間</button>
+                    </div>
+                    <div style="font-size:0.65rem; color:var(--text-muted);">
+                        <span id="my-id">尚未建立房間</span>
                     </div>
                 </div>
             </div>
@@ -600,18 +611,24 @@
             return false;
         }
 
-        function initPeer() {
+        function initPeer(customId = null) {
             if (peer) return;
 
-            peer = new Peer({
+            const peerOptions = {
                 config: {
                     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
                 }
-            });
+            };
+
+            if (customId) peerOptions.host = undefined;
+
+            peer = customId
+                ? new Peer(customId, peerOptions)
+                : new Peer(peerOptions);
 
             peer.on('open', (id) => {
-                document.getElementById('my-id').innerText = id;
-                log(`P2P 房號: ${id}`);
+                document.getElementById('my-id').innerText = `房間：${id}`;
+                log(`P2P 房間已建立：${id}`);
 
                 // 使用者在 Peer 尚未 open 時按下連線，延後到 open 後再連。
                 if (pendingPeerId) {
@@ -636,16 +653,43 @@
             });
         }
 
+        function createRoom() {
+            const roomId = document.getElementById('room-id').value.trim();
+
+            if (!roomId) {
+                return alert("請輸入自訂房間 ID！");
+            }
+
+            if (!/^[A-Za-z0-9_-]+$/.test(roomId)) {
+                return alert("房間 ID 只能使用英文字母、數字、底線 _ 或減號 -");
+            }
+
+            if (peer) {
+                if (peer.open) {
+                    document.getElementById('my-id').innerText = `房間：${peer.id}`;
+                    log(`目前房間：${peer.id}`);
+                    return;
+                }
+                peer.destroy();
+                peer = null;
+            }
+
+            myRole = 'KMT';
+            log(`正在建立房間：${roomId} ...`);
+
+            initPeer(roomId);
+        }
+
         function connectToPeer() {
             const targetId = document.getElementById('join-id').value.trim();
-            if (!targetId) return alert("請輸入 ID！");
+            if (!targetId) return alert("請輸入要加入的房間 ID！");
 
+            // 加入別人的房間時，本機使用 PeerJS 自動產生的 ID。
             if (!peer) initPeer();
 
-            // PeerJS 必須等本機 Peer open 後再建立連線。
             if (!peer.open) {
                 pendingPeerId = targetId;
-                log(`等待 P2P 初始化後連線...`);
+                log(`等待 P2P 初始化後加入房間...`);
                 return;
             }
 
@@ -737,7 +781,6 @@
             } else {
                 gameMode = 'P2P';
                 myRole = 'KMT';
-                initPeer();
             }
 
             document.getElementById('btn-mode-ai').classList.toggle('active', mode === 'AI');
