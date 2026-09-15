@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- PeerJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 
     <style>
         :root {
@@ -187,6 +187,19 @@
             .hud-bar { justify-content: space-around; }
         }
     </style>
+<script>
+        // PeerJS CDN 載入檢查
+        window.addEventListener('DOMContentLoaded', function () {
+            if (typeof window.Peer !== 'function') {
+                console.error('PeerJS 載入失敗：window.Peer 不存在');
+                const msg = document.createElement('div');
+                msg.style.cssText = 'position:fixed;left:10px;right:10px;bottom:10px;z-index:99999;padding:12px;background:#7f1d1d;color:#fff;border:1px solid #ef4444;border-radius:8px;font-family:system-ui;';
+                msg.textContent = 'PeerJS 載入失敗。請確認網路可以載入 cdnjs.cloudflare.com，或將 PeerJS 檔案下載到本機後使用。';
+                document.body.appendChild(msg);
+            }
+        });
+    </script>
+
 </head>
 <body>
 
@@ -308,6 +321,7 @@
         let selectedRegionId = null;
         let myRole = 'KMT';
         let peer = null, conn = null, isAiThinking = false, gameOver = false, pendingPeerId = null;
+        let reconnectTimer = null, peerConnecting = false;
 
         function initMap() {
             // 初始化靜態鎖定地圖 (絕對禁止移動與縮放)
@@ -612,45 +626,121 @@
         }
 
         function initPeer(customId = null) {
-            if (peer) return;
+            // 已經有可用 Peer 時直接使用。
+            if (peer && !peer.destroyed) return peer;
 
+            peerConnecting = true;
+
+            // PeerJS Cloud 官方預設使用 0.peerjs.com:443。
+            // 明確指定可避免瀏覽器/環境對預設設定處理不同。
             const peerOptions = {
+                host: '0.peerjs.com',
+                port: 443,
+                path: '/',
+                secure: true,
+                debug: 2,
                 config: {
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ],
+                    sdpSemantics: 'unified-plan'
                 }
             };
 
-            if (customId) peerOptions.host = undefined;
-
-            peer = customId
-                ? new Peer(customId, peerOptions)
-                : new Peer(peerOptions);
+            try {
+                peer = customId
+                    ? new Peer(customId, peerOptions)
+                    : new Peer(peerOptions);
+            } catch (err) {
+                peerConnecting = false;
+                log(`P2P 建立失敗：${err.message || err}`);
+                return null;
+            }
 
             peer.on('open', (id) => {
-                document.getElementById('my-id').innerText = `房間：${id}`;
-                log(`P2P 房間已建立：${id}`);
+                peerConnecting = false;
 
-                // 使用者在 Peer 尚未 open 時按下連線，延後到 open 後再連。
+                const idEl = document.getElementById('my-id');
+                if (idEl) idEl.innerText = `房間：${id}`;
+
+                log(`P2P 訊號伺服器已連線：${id}`);
+
+                // 加入房間時，如果本機 Peer 尚未 open，這裡才真正連線。
                 if (pendingPeerId) {
                     const targetId = pendingPeerId;
                     pendingPeerId = null;
-                    connectToPeerId(targetId);
+                    setTimeout(() => connectToPeerId(targetId), 100);
                 }
             });
 
-            peer.on('connection', (c) => {
-                // 同一時間只維持一條連線。
-                if (conn && conn.open) conn.close();
+            peer.on('connection', (incoming) => {
+                // 房主只接受第一條有效連線。
+                if (conn && (conn.open || conn._pending)) {
+                    incoming.close();
+                    return;
+                }
 
-                conn = c;
+                conn = incoming;
                 myRole = 'KMT';
-                log(`對手已加入！你扮演 國軍`);
+                log(`對手已加入房間，等待 P2P 通道建立...`);
                 setupConnection(conn, true);
             });
 
-            peer.on('error', (err) => {
-                log(`P2P 錯誤：${err.type || err.message || '未知錯誤'}`);
+            peer.on('disconnected', () => {
+                log(`P2P 訊號伺服器斷線，正在嘗試重新連線...`);
+
+                clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(() => {
+                    if (peer && peer.disconnected && !peer.destroyed) {
+                        try {
+                            peer.reconnect();
+                        } catch (err) {
+                            log(`P2P 重連失敗：${err.message || err}`);
+                        }
+                    }
+                }, 1500);
             });
+
+            peer.on('close', () => {
+                peerConnecting = false;
+                log(`P2P Peer 已關閉。`);
+            });
+
+            peer.on('error', (err) => {
+                peerConnecting = false;
+
+                const type = err && err.type ? err.type : 'unknown';
+                const messages = {
+                    'network': '無法連到 PeerJS 訊號伺服器。請確認網路沒有封鎖 HTTPS/443。',
+                    'server-error': 'PeerJS 伺服器無法連線。',
+                    'socket-error': 'WebSocket 連線發生錯誤。',
+                    'socket-closed': 'WebSocket 連線意外關閉。',
+                    'unavailable-id': '這個房間 ID 已經有人使用，請換一個。',
+                    'peer-unavailable': '找不到這個房間，請確認房間 ID。',
+                    'invalid-id': '房間 ID 格式不正確。',
+                    'browser-incompatible': '目前瀏覽器不支援必要的 WebRTC 功能。',
+                    'webrtc': 'WebRTC 建立 P2P 連線失敗。'
+                };
+
+                log(`P2P 錯誤 [${type}]：${messages[type] || err.message || '未知錯誤'}`);
+
+                // network / socket 類問題：保留 Peer，讓 disconnected 事件負責 reconnect。
+                if (type === 'network' || type === 'socket-error' || type === 'socket-closed') {
+                    clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(() => {
+                        if (peer && peer.disconnected && !peer.destroyed) {
+                            try {
+                                peer.reconnect();
+                                log(`正在重新連接 PeerJS...`);
+                            } catch (e) {
+                                log(`重新連接失敗：${e.message || e}`);
+                            }
+                        }
+                    }, 2000);
+                }
+            });
+
+            return peer;
         }
 
         function createRoom() {
@@ -660,36 +750,59 @@
                 return alert("請輸入自訂房間 ID！");
             }
 
-            if (!/^[A-Za-z0-9_-]+$/.test(roomId)) {
-                return alert("房間 ID 只能使用英文字母、數字、底線 _ 或減號 -");
+            // PeerJS 自訂 ID：開頭/結尾必須是英數字，中間可有 - 或 _。
+            if (!/^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,30}[A-Za-z0-9])?$/.test(roomId)) {
+                return alert("房間 ID 必須以英數字開頭與結尾，中間只能使用英數字、_、-，最多 32 字元。");
             }
 
-            if (peer) {
-                if (peer.open) {
-                    document.getElementById('my-id').innerText = `房間：${peer.id}`;
-                    log(`目前房間：${peer.id}`);
+            if (peer && !peer.destroyed) {
+                if (peer.id === roomId && !peer.disconnected) {
+                    log(`目前已經是房間：${roomId}`);
                     return;
                 }
-                peer.destroy();
+
+                try { peer.destroy(); } catch (_) {}
                 peer = null;
             }
 
+            if (conn) {
+                try { conn.close(); } catch (_) {}
+                conn = null;
+            }
+
+            pendingPeerId = null;
             myRole = 'KMT';
             log(`正在建立房間：${roomId} ...`);
-
             initPeer(roomId);
         }
 
         function connectToPeer() {
             const targetId = document.getElementById('join-id').value.trim();
-            if (!targetId) return alert("請輸入要加入的房間 ID！");
 
-            // 加入別人的房間時，本機使用 PeerJS 自動產生的 ID。
-            if (!peer) initPeer();
+            if (!targetId) {
+                return alert("請輸入要加入的房間 ID！");
+            }
 
-            if (!peer.open) {
+            if (!/^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,30}[A-Za-z0-9])?$/.test(targetId)) {
+                return alert("房間 ID 格式不正確。");
+            }
+
+            // 加入者使用 PeerJS 自動產生自己的 Peer ID。
+            if (!peer || peer.destroyed) {
                 pendingPeerId = targetId;
-                log(`等待 P2P 初始化後加入房間...`);
+                log(`正在初始化 P2P，準備加入房間：${targetId}`);
+                initPeer();
+                return;
+            }
+
+            if (peer.disconnected) {
+                pendingPeerId = targetId;
+                try {
+                    peer.reconnect();
+                    log(`PeerJS 訊號斷線，正在重新連線...`);
+                } catch (err) {
+                    log(`重新連線失敗：${err.message || err}`);
+                }
                 return;
             }
 
@@ -697,25 +810,61 @@
         }
 
         function connectToPeerId(targetId) {
-            if (!peer) return;
+            if (!peer || peer.destroyed) {
+                pendingPeerId = targetId;
+                initPeer();
+                return;
+            }
 
-            if (conn && conn.open) conn.close();
+            if (peer.disconnected) {
+                pendingPeerId = targetId;
+                try { peer.reconnect(); } catch (_) {}
+                return;
+            }
 
-            conn = peer.connect(targetId);
-            myRole = 'CPC';
-            log(`正在連線房主...`);
-            setupConnection(conn, false);
+            if (conn) {
+                try { conn.close(); } catch (_) {}
+                conn = null;
+            }
+
+            try {
+                conn = peer.connect(targetId, {
+                    label: 'battle-room',
+                    serialization: 'json',
+                    reliable: true,
+                    metadata: {
+                        role: 'CPC',
+                        version: 1
+                    }
+                });
+
+                myRole = 'CPC';
+                log(`正在加入房間：${targetId} ...`);
+                setupConnection(conn, false);
+            } catch (err) {
+                log(`建立 P2P 通道失敗：${err.message || err}`);
+            }
         }
 
         function setupConnection(connection, isHost) {
             if (!connection) return;
 
+            connection._pending = true;
+
             connection.on('open', () => {
+                connection._pending = false;
                 log(`P2P 通道建立成功！`);
 
-                // 修正原本 INIT 在 connection 尚未 open 時送出而遺失的問題。
+                // 只有通道真的 open 後才傳送 INIT。
                 if (isHost) {
-                    sendData({ type: 'INIT', gameState: gameState });
+                    try {
+                        connection.send({
+                            type: 'INIT',
+                            gameState: gameState
+                        });
+                    } catch (err) {
+                        log(`初始化資料傳送失敗：${err.message || err}`);
+                    }
                 }
 
                 renderMapElements();
@@ -727,11 +876,13 @@
 
                 if (data.type === 'INIT') {
                     if (!data.gameState || !Array.isArray(data.gameState.regions)) return;
+
                     gameState = data.gameState;
                     gameOver = false;
                     log(`已同步戰局資料，你扮演 共軍`);
                 } else if (data.type === 'ACTION' || data.type === 'END_TURN') {
                     if (!data.gameState || !Array.isArray(data.gameState.regions)) return;
+
                     gameState = data.gameState;
 
                     if (data.anim &&
@@ -757,25 +908,50 @@
             });
 
             connection.on('close', () => {
-                log(`P2P 連線已關閉。`);
+                connection._pending = false;
+                if (conn === connection) {
+                    log(`P2P 對戰連線已關閉。`);
+                    conn = null;
+                }
             });
 
             connection.on('error', (err) => {
-                log(`連線錯誤：${err.message || '未知錯誤'}`);
+                connection._pending = false;
+                log(`P2P 通道錯誤：${err.message || '未知錯誤'}`);
             });
         }
 
         function sendData(data) {
-            if (conn && conn.open) conn.send(data);
+            if (!conn || !conn.open) {
+                log(`資料尚未傳送：P2P 通道尚未建立。`);
+                return false;
+            }
+
+            try {
+                conn.send(data);
+                return true;
+            } catch (err) {
+                log(`資料傳送失敗：${err.message || err}`);
+                return false;
+            }
         }
 
         function switchGameMode(mode) {
             if (mode === gameMode) return;
 
             if (mode === 'AI') {
-                if (conn && conn.open) conn.close();
+                if (conn) {
+                    try { conn.close(); } catch (_) {}
+                }
                 conn = null;
                 pendingPeerId = null;
+                clearTimeout(reconnectTimer);
+
+                if (peer && !peer.destroyed) {
+                    try { peer.destroy(); } catch (_) {}
+                }
+                peer = null;
+
                 gameMode = 'AI';
                 myRole = 'KMT';
             } else {
@@ -791,7 +967,9 @@
         }
 
         function resetGame(notify = true) {
-            if (gameMode === 'P2P' && notify && conn && conn.open) sendData({ type: 'RESET' });
+            if (gameMode === 'P2P' && notify && conn && conn.open) {
+                sendData({ type: 'RESET' });
+            }
             resetGameData();
         }
 
