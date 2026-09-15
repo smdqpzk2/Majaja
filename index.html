@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大戰局：歷史反攻地圖 - P2P 連線修復版</title>
+    <title>大戰局：歷史反攻地圖 - MQTT 秒連版</title>
     <!-- FontAwesome 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Leaflet CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- PeerJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+    <!-- MQTT.js (替代不穩定的 PeerJS) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
 
     <style>
         :root {
@@ -101,6 +101,7 @@
         }
         .end-turn-btn:disabled { background: #334155; color: #64748b; box-shadow: none; }
 
+        /* 50vh 靜態鎖定地圖 */
         #map-container { 
             position: relative; width: 100%; border-radius: 8px; 
             overflow: hidden; border: 1px solid var(--panel-border); 
@@ -190,11 +191,11 @@
     <header>
         <div class="title-group">
             <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局：<span>反攻戰術地圖</span></h1>
-            <div class="subtitle">連線優化版</div>
+            <div class="subtitle">MQTT 高速對戰版</div>
         </div>
         <div class="mode-selector">
             <button class="mode-btn active" id="btn-mode-ai" onclick="switchGameMode('AI')"><i class="fa-solid fa-robot"></i> AI 單人</button>
-            <button class="mode-btn" id="btn-mode-p2p" onclick="switchGameMode('P2P')"><i class="fa-solid fa-network-wired"></i> P2P 雙人</button>
+            <button class="mode-btn" id="btn-mode-p2p" onclick="switchGameMode('P2P')"><i class="fa-solid fa-network-wired"></i> 雙人連線</button>
         </div>
     </header>
 
@@ -252,11 +253,17 @@
                     </button>
                 </div>
 
+                <!-- 簡化後的連線面板 -->
                 <div id="p2p-panel" style="display: none; flex-direction: column; gap:4px; border-top:1px solid rgba(255,255,255,0.1); padding-top:6px;">
-                    <div style="font-size:0.7rem; color:var(--gold-accent);">房號 ID: <span id="my-id" style="color:#fff;">生成中...</span></div>
+                    <div style="font-size:0.7rem; color:var(--gold-accent);">陣營：
+                        <select id="role-select" onchange="changeRole(this.value)" style="background:#000; color:#fff; border:1px solid var(--panel-border); font-size:0.7rem;">
+                            <option value="KMT">國軍 (房主)</option>
+                            <option value="CPC">共軍 (挑戰者)</option>
+                        </select>
+                    </div>
                     <div style="display:flex; gap:4px;">
-                        <input type="text" id="join-id" placeholder="貼上對手 ID" style="background:#000; border:1px solid var(--panel-border); color:#fff; padding:4px; font-size:0.75rem; border-radius:4px; flex:1;">
-                        <button class="mode-btn" id="btn-connect" style="background:var(--gold-accent); color:#000; font-weight:bold;" onclick="connectToPeer()">連線</button>
+                        <input type="text" id="room-id" value="room888" placeholder="輸入相同房號" style="background:#000; border:1px solid var(--panel-border); color:#fff; padding:4px; font-size:0.75rem; border-radius:4px; flex:1;">
+                        <button class="mode-btn" id="btn-connect" style="background:var(--gold-accent); color:#000; font-weight:bold;" onclick="joinRoom()">進入房間</button>
                     </div>
                 </div>
             </div>
@@ -287,8 +294,10 @@
         let gameState = { turn: 'KMT', ap: MAX_AP, round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
         let selectedRegionId = null;
         let myRole = 'KMT';
-        let peer = null, conn = null, isAiThinking = false;
-        let connTimeoutTimer = null;
+        let mqttClient = null;
+        let currentTopic = "";
+        let mySenderId = Math.random().toString(36).substring(7);
+        let isAiThinking = false;
 
         function initMap() {
             map = L.map('map', {
@@ -405,311 +414,4 @@
             const btnConscript = document.getElementById('act-conscript');
 
             if (!region || !isMyTurn) {
-                [btnAttack, btnRaid, btnFortify, btnConscript].forEach(btn => btn.disabled = true);
-                return;
-            }
-
-            const isEnemy = region.owner !== myRole;
-            btnAttack.disabled = !isEnemy || gameState.ap < 2;
-            btnRaid.disabled = !isEnemy || gameState.ap < 1;
-            btnFortify.disabled = isEnemy || gameState.ap < 1;
-            btnConscript.disabled = isEnemy || gameState.ap < 2;
-        }
-
-        function executeTacticalAction(type) {
-            if (gameState.turn !== myRole || isAiThinking || !selectedRegionId) return;
-
-            const region = gameState.regions.find(r => r.id === selectedRegionId);
-            if (!region) return;
-
-            let logMsg = ``, animText = "", animColor = "#f43f5e", apCost = 0;
-
-            if (type === 'ATTACK') {
-                apCost = 2;
-                const damage = Math.floor(Math.random() * 21) + 25;
-                region.hp -= damage;
-                animText = `-${damage}`;
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 強襲 [${region.name}] -${damage} HP`;
-            } else if (type === 'RAID') {
-                apCost = 1;
-                const isCrit = Math.random() < 0.35;
-                const damage = isCrit ? 50 : 15;
-                region.hp -= damage;
-                animText = isCrit ? `暴擊 -${damage}` : `奇襲 -${damage}`;
-                animColor = "#a855f7";
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 奇襲 [${region.name}] ${isCrit ? '(暴擊!)' : ''} -${damage} HP`;
-            } else if (type === 'FORTIFY') {
-                apCost = 1;
-                region.hp = Math.min(region.maxHp, region.hp + 25);
-                animText = `+25`; animColor = "#22c55e";
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 加固 [${region.name}] +25 HP`;
-            } else if (type === 'CONSCRIPT') {
-                apCost = 2;
-                region.maxHp += 20; region.hp += 20;
-                animText = `上限+20`; animColor = "#38bdf8";
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} [${region.name}] 徵兵，上限提升`;
-            }
-
-            gameState.ap -= apCost;
-
-            if (region.hp <= 0) {
-                region.hp = 50;
-                region.owner = myRole;
-                logMsg += ` (成功佔領該區域！)`;
-            }
-
-            showMapFloatingNum(region.lat, region.lng, animText, animColor);
-            log(logMsg);
-
-            renderMapElements();
-            updateActionButtonStates();
-
-            if (gameMode === 'P2P') {
-                sendData({
-                    type: 'ACTION',
-                    gameState: gameState,
-                    msg: logMsg,
-                    anim: { lat: region.lat, lng: region.lng, text: animText, color: animColor }
-                });
-            }
-
-            checkWin();
-        }
-
-        function endTurn() {
-            if (gameState.turn !== myRole || isAiThinking) return;
-
-            gameState.turn = gameState.turn === 'KMT' ? 'CPC' : 'KMT';
-            gameState.ap = MAX_AP;
-            gameState.round += 1;
-
-            log(`--- 切換至 [${gameState.turn === 'KMT' ? '國軍' : '共軍'}] 行動階段 ---`);
-
-            renderMapElements();
-            updateActionButtonStates();
-
-            if (gameMode === 'P2P') {
-                sendData({ type: 'END_TURN', gameState: gameState, msg: `對手已結束回合` });
-            }
-
-            if (gameMode === 'AI' && gameState.turn === 'CPC') {
-                aiTurnEngine();
-            }
-        }
-
-        function aiTurnEngine() {
-            isAiThinking = true;
-            updateHUD();
-            updateActionButtonStates();
-
-            let aiAp = MAX_AP;
-
-            const aiInterval = setInterval(() => {
-                const kmtRegions = gameState.regions.filter(r => r.owner === 'KMT');
-                const cpcRegions = gameState.regions.filter(r => r.owner === 'CPC');
-
-                if (aiAp >= 2 && kmtRegions.length > 0) {
-                    kmtRegions.sort((a, b) => a.hp - b.hp);
-                    const target = kmtRegions[0];
-                    const dmg = 30;
-                    target.hp -= dmg;
-                    aiAp -= 2;
-
-                    showMapFloatingNum(target.lat, target.lng, `-${dmg}`, "#f43f5e");
-                    let msg = `電腦 AI 強襲攻打 [${target.name}] (-${dmg})`;
-                    if (target.hp <= 0) { target.hp = 50; target.owner = 'CPC'; msg += ` (已被佔領)`; }
-                    log(msg);
-                } else if (aiAp >= 1 && cpcRegions.length > 0) {
-                    cpcRegions.sort((a, b) => a.hp - b.hp);
-                    const target = cpcRegions[0];
-                    target.hp = Math.min(target.maxHp, target.hp + 25);
-                    aiAp -= 1;
-
-                    showMapFloatingNum(target.lat, target.lng, `+25`, "#22c55e");
-                    log(`電腦 AI 加固 [${target.name}] 防線`);
-                } else {
-                    aiAp = 0;
-                }
-
-                renderMapElements();
-
-                if (aiAp <= 0 || checkWin()) {
-                    clearInterval(aiInterval);
-                    gameState.turn = 'KMT';
-                    gameState.ap = MAX_AP;
-                    gameState.round += 1;
-                    isAiThinking = false;
-                    log(`--- 電腦 AI 結束回合，輪至你的階段 ---`);
-                    renderMapElements();
-                    updateActionButtonStates();
-                }
-            }, 800);
-        }
-
-        function showMapFloatingNum(lat, lng, text, color) {
-            const point = map.latLngToContainerPoint([lat, lng]);
-            const num = document.createElement('div');
-            num.className = 'floating-num';
-            num.innerText = text;
-            num.style.color = color;
-            num.style.left = `${point.x}px`;
-            num.style.top = `${point.y}px`;
-            document.getElementById('map-container').appendChild(num);
-            setTimeout(() => num.remove(), 800);
-        }
-
-        function checkWin() {
-            const kmtCount = gameState.regions.filter(r => r.owner === 'KMT').length;
-            const cpcCount = gameState.regions.filter(r => r.owner === 'CPC').length;
-
-            if (cpcCount === 0) { alert("【勝利】光復所有重鎮，戰局結束！"); return true; }
-            if (kmtCount === 0) { alert("【敗北】防線被攻破，戰局結束！"); return true; }
-            return false;
-        }
-
-        // --- 優化後的 WebRTC PeerJS 連線邏輯 ---
-        function initPeer() {
-            if (peer) {
-                if(!peer.destroyed) return;
-            }
-
-            document.getElementById('my-id').innerText = "連線伺服器中...";
-
-            // 導入多個 Google 公共 STUN 伺服器以確保穿透 4G/Wi-Fi 防火牆
-            peer = new Peer({
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' },
-                        { urls: 'stun:stun4.l.google.com:19302' }
-                    ]
-                }
-            });
-
-            peer.on('open', (id) => {
-                document.getElementById('my-id').innerText = id;
-                log(`P2P 房號已產生: ${id}`);
-            });
-
-            peer.on('connection', (c) => {
-                conn = c;
-                myRole = 'KMT';
-                log(`對手已加入！你扮演 [國軍]`);
-                setupConnection();
-                setTimeout(() => {
-                    sendData({ type: 'INIT', gameState: gameState });
-                }, 500);
-            });
-
-            peer.on('error', (err) => {
-                log(`P2P 錯誤: ${err.type}`);
-                alert(`連線發生錯誤: ${err.type}，請重試或重新產生房號`);
-            });
-        }
-
-        function connectToPeer() {
-            const targetId = document.getElementById('join-id').value.trim();
-            if (!targetId) return alert("請輸入房主 ID！");
-            
-            if (!peer || peer.destroyed) {
-                alert("信號伺服器尚未連線，請稍後再試！");
-                initPeer();
-                return;
-            }
-
-            const btnConnect = document.getElementById('btn-connect');
-            btnConnect.disabled = true;
-            btnConnect.innerText = "連線中...";
-
-            log(`正在連線房主: ${targetId} ...`);
-            conn = peer.connect(targetId, { reliable: true });
-            myRole = 'CPC';
-
-            // 10 秒逾時檢測
-            connTimeoutTimer = setTimeout(() => {
-                if (conn && !conn.open) {
-                    log(`連線逾時！請確認房號是否正確，或兩端皆使用 Wi-Fi/行動網路`);
-                    alert("連線逾時！請確認 ID 是否複製完整，或讓房主重新刷新頁面取得新 ID。");
-                    btnConnect.disabled = false;
-                    btnConnect.innerText = "連線";
-                }
-            }, 10000);
-
-            setupConnection();
-        }
-
-        function setupConnection() {
-            conn.on('open', () => {
-                if(connTimeoutTimer) clearTimeout(connTimeoutTimer);
-                const btnConnect = document.getElementById('btn-connect');
-                if(btnConnect) {
-                    btnConnect.disabled = false;
-                    btnConnect.innerText = "連線";
-                }
-                log(`P2P 雙向通道建立成功！`);
-                renderMapElements();
-                updateActionButtonStates();
-            });
-
-            conn.on('data', (data) => {
-                if (data.type === 'INIT') {
-                    gameState = data.gameState;
-                    log(`成功同步對手資料，你扮演 [共軍]`);
-                } else if (data.type === 'ACTION' || data.type === 'END_TURN') {
-                    gameState = data.gameState;
-                    if(data.anim) showMapFloatingNum(data.anim.lat, data.anim.lng, data.anim.text, data.anim.color);
-                    log(data.msg);
-                } else if (data.type === 'RESET') {
-                    alert("對手重置了戰局！");
-                    resetGameData();
-                }
-                renderMapElements();
-                updateActionButtonStates();
-                checkWin();
-            });
-
-            conn.on('close', () => {
-                log(`對手已斷開連線`);
-                alert("對手已離開連線");
-            });
-        }
-
-        function sendData(data) { if (conn && conn.open) conn.send(data); }
-
-        function switchGameMode(mode) {
-            gameMode = mode;
-            document.getElementById('btn-mode-ai').classList.toggle('active', mode === 'AI');
-            document.getElementById('btn-mode-p2p').classList.toggle('active', mode === 'P2P');
-            document.getElementById('p2p-panel').style.display = mode === 'P2P' ? 'flex' : 'none';
-
-            if (mode === 'P2P') initPeer();
-            myRole = 'KMT';
-            resetGame(true);
-        }
-
-        function resetGame(notify = true) {
-            if (gameMode === 'P2P' && notify && conn && conn.open) sendData({ type: 'RESET' });
-            resetGameData();
-        }
-
-        function resetGameData() {
-            isAiThinking = false;
-            gameState = { turn: 'KMT', ap: MAX_AP, round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
-            selectedRegionId = null;
-            renderMapElements();
-            updateActionButtonStates();
-            log(`戰局已恢復初始狀態`);
-        }
-
-        function log(msg) {
-            const win = document.getElementById('log-window');
-            win.innerHTML += `<div>> ${msg}</div>`;
-            win.scrollTop = win.scrollHeight;
-        }
-
-        window.onload = () => { initMap(); };
-    </script>
-</body>
-</html>
+                [btnAttack, btnRaid, btnFortify, bt
