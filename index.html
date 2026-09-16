@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大戰局：歷史反攻地圖 - 靜態半螢幕版</title>
+    <title>大戰局：歷史反攻地圖 - P2P 修正版</title>
     <!-- FontAwesome 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Leaflet CSS & JS -->
@@ -216,6 +216,11 @@
         </div>
     </header>
 
+    <div id="connection-status" style="width:100%;max-width:1100px;margin:4px auto 0;padding:6px 10px;border:1px solid rgba(56,189,248,.25);border-radius:8px;background:rgba(13,19,28,.92);color:#94a3b8;font-size:.72rem;">
+        <span id="connection-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#64748b;margin-right:6px;"></span>
+        <span id="connection-text">AI 單人模式就緒</span>
+    </div>
+
     <div class="main-container">
         <!-- 戰術抬頭面板 -->
         <div class="hud-bar">
@@ -321,7 +326,7 @@
         let selectedRegionId = null;
         let myRole = 'KMT';
         let peer = null, conn = null, isAiThinking = false, gameOver = false, pendingPeerId = null;
-        let reconnectTimer = null, peerConnecting = false;
+        let reconnectTimer = null, peerConnecting = false, connectionTimeout = null;
 
         function initMap() {
             // 初始化靜態鎖定地圖 (絕對禁止移動與縮放)
@@ -625,23 +630,53 @@
             return false;
         }
 
+        function setConnectionStatus(text, state = 'idle') {
+            const label = document.getElementById('connection-text');
+            const dot = document.getElementById('connection-dot');
+            if (label) label.textContent = text;
+            if (dot) {
+                dot.style.background =
+                    state === 'success' ? '#22c55e' :
+                    state === 'error' ? '#ef4444' :
+                    state === 'connecting' ? '#f59e0b' : '#64748b';
+            }
+        }
+
+        function clearConnectionTimeout() {
+            if (connectionTimeout) {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = null;
+            }
+        }
+
+        function startConnectionTimeout(label) {
+            clearConnectionTimeout();
+            connectionTimeout = setTimeout(() => {
+                connectionTimeout = null;
+                if (!conn || !conn.open) {
+                    setConnectionStatus(label + ' 連線逾時，請檢查兩端網路或嘗試不同網路。', 'error');
+                    log('P2P 連線逾時：WebRTC DataChannel 尚未建立');
+                }
+            }, 15000);
+        }
+
         function initPeer(customId = null) {
             // 已經有可用 Peer 時直接使用。
             if (peer && !peer.destroyed) return peer;
 
             peerConnecting = true;
+            setConnectionStatus('正在連線 PeerJS 訊號伺服器…', 'connecting');
 
-            // PeerJS Cloud 官方預設使用 0.peerjs.com:443。
-            // 明確指定可避免瀏覽器/環境對預設設定處理不同。
+            // 使用 PeerJS Cloud 官方預設 signalling server。
+            // 增加多個 STUN，改善不同網路環境下的 WebRTC 穿透成功率。
+            // 注意：若兩端都處於 symmetric NAT，仍可能需要自有 TURN server。
             const peerOptions = {
-                host: '0.peerjs.com',
-                port: 443,
-                path: '/',
-                secure: true,
                 debug: 2,
                 config: {
                     iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' }
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun.cloudflare.com:3478' }
                     ],
                     sdpSemantics: 'unified-plan'
                 }
@@ -663,6 +698,7 @@
                 const idEl = document.getElementById('my-id');
                 if (idEl) idEl.innerText = `房間：${id}`;
 
+                setConnectionStatus(`PeerJS 已連線，房間 ID：${id}`, 'success');
                 log(`P2P 訊號伺服器已連線：${id}`);
 
                 // 加入房間時，如果本機 Peer 尚未 open，這裡才真正連線。
@@ -682,11 +718,14 @@
 
                 conn = incoming;
                 myRole = 'KMT';
+                setConnectionStatus(`對手 ${incoming.peer} 已找到，正在建立 WebRTC…`, 'connecting');
                 log(`對手已加入房間，等待 P2P 通道建立...`);
+                startConnectionTimeout('房主');
                 setupConnection(conn, true);
             });
 
             peer.on('disconnected', () => {
+                setConnectionStatus('PeerJS 訊號伺服器斷線，正在重新連線…', 'connecting');
                 log(`P2P 訊號伺服器斷線，正在嘗試重新連線...`);
 
                 clearTimeout(reconnectTimer);
@@ -722,7 +761,9 @@
                     'webrtc': 'WebRTC 建立 P2P 連線失敗。'
                 };
 
-                log(`P2P 錯誤 [${type}]：${messages[type] || err.message || '未知錯誤'}`);
+                const detail = messages[type] || err.message || '未知錯誤';
+                setConnectionStatus(`P2P 錯誤：${detail}`, 'error');
+                log(`P2P 錯誤 [${type}]：${detail}`);
 
                 // network / socket 類問題：保留 Peer，讓 disconnected 事件負責 reconnect。
                 if (type === 'network' || type === 'socket-error' || type === 'socket-closed') {
@@ -772,6 +813,7 @@
 
             pendingPeerId = null;
             myRole = 'KMT';
+            setConnectionStatus(`正在建立房間「${roomId}」…`, 'connecting');
             log(`正在建立房間：${roomId} ...`);
             initPeer(roomId);
         }
@@ -790,6 +832,7 @@
             // 加入者使用 PeerJS 自動產生自己的 Peer ID。
             if (!peer || peer.destroyed) {
                 pendingPeerId = targetId;
+                setConnectionStatus(`正在尋找房間「${targetId}」…`, 'connecting');
                 log(`正在初始化 P2P，準備加入房間：${targetId}`);
                 initPeer();
                 return;
@@ -828,6 +871,7 @@
             }
 
             try {
+                setConnectionStatus(`正在建立與「${targetId}」的 WebRTC 連線…`, 'connecting');
                 conn = peer.connect(targetId, {
                     label: 'battle-room',
                     serialization: 'json',
@@ -840,6 +884,7 @@
 
                 myRole = 'CPC';
                 log(`正在加入房間：${targetId} ...`);
+                startConnectionTimeout('加入房間');
                 setupConnection(conn, false);
             } catch (err) {
                 log(`建立 P2P 通道失敗：${err.message || err}`);
@@ -853,6 +898,8 @@
 
             connection.on('open', () => {
                 connection._pending = false;
+                clearConnectionTimeout();
+                setConnectionStatus(`P2P 通道已建立：已與 ${connection.peer} 連線`, 'success');
                 log(`P2P 通道建立成功！`);
 
                 // 只有通道真的 open 後才傳送 INIT。
@@ -910,6 +957,8 @@
             connection.on('close', () => {
                 connection._pending = false;
                 if (conn === connection) {
+                    clearConnectionTimeout();
+                    setConnectionStatus('P2P 對戰連線已關閉', 'error');
                     log(`P2P 對戰連線已關閉。`);
                     conn = null;
                 }
@@ -917,6 +966,8 @@
 
             connection.on('error', (err) => {
                 connection._pending = false;
+                clearConnectionTimeout();
+                setConnectionStatus(`P2P 通道錯誤：${err.message || '未知錯誤'}`, 'error');
                 log(`P2P 通道錯誤：${err.message || '未知錯誤'}`);
             });
         }
@@ -946,6 +997,7 @@
                 conn = null;
                 pendingPeerId = null;
                 clearTimeout(reconnectTimer);
+                clearConnectionTimeout();
 
                 if (peer && !peer.destroyed) {
                     try { peer.destroy(); } catch (_) {}
@@ -991,7 +1043,17 @@
             win.scrollTop = win.scrollHeight;
         }
 
-        window.onload = () => { initMap(); };
+        window.onload = () => {
+            initMap();
+
+            if (!window.RTCPeerConnection || !window.RTCDataChannel) {
+                setConnectionStatus('此瀏覽器不支援 WebRTC DataChannel，P2P 無法使用。', 'error');
+            } else if (typeof window.Peer !== 'function') {
+                setConnectionStatus('PeerJS 尚未載入，請確認可以連線 cdnjs.cloudflare.com。', 'error');
+            } else {
+                setConnectionStatus('AI 單人模式就緒；切換到 P2P 後即可建立或加入房間。', 'idle');
+            }
+        };
     </script>
 </body>
 </html>
