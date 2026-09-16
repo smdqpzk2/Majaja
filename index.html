@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大戰局：歷史反攻地圖 - P2V-V2 修正版</title>
+    <title>大戰局：歷史反攻地圖 - P2P-V3 修正版</title>
     <!-- FontAwesome 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Leaflet CSS & JS -->
@@ -166,6 +166,32 @@
             display:none; margin-top:6px; padding:8px; border:1px solid var(--gold-accent);
             border-radius:6px; background:rgba(245,158,11,0.10); color:#fff;
         }
+        /* 緊急任務地圖覆蓋層：事件出現時直接蓋在地圖中央 */
+        #map-event-overlay {
+            position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+            width:min(520px, calc(100% - 28px)); z-index:1200; display:none;
+            border:1px solid var(--gold-accent); border-radius:12px;
+            background:rgba(7,10,14,.94); box-shadow:0 0 28px rgba(245,158,11,.28);
+            backdrop-filter:blur(6px); padding:14px; color:#fff;
+        }
+        #map-event-overlay .map-event-tag {
+            display:inline-block; padding:3px 7px; border-radius:999px;
+            background:rgba(245,158,11,.15); color:var(--gold-accent);
+            font-size:.62rem; font-weight:900; letter-spacing:.08em; margin-bottom:6px;
+        }
+        #map-event-overlay .map-event-title { color:var(--gold-accent); font-size:1rem; font-weight:900; }
+        #map-event-overlay .map-event-desc { color:var(--text-main); font-size:.72rem; line-height:1.5; margin:6px 0 10px; }
+        #map-event-overlay .map-event-choices { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        #map-event-overlay .map-event-choice {
+            border:1px solid rgba(245,158,11,.55); border-radius:8px; padding:9px;
+            background:rgba(245,158,11,.08); color:#fff; cursor:pointer; text-align:left;
+            font-weight:800; font-size:.7rem; transition:.15s ease;
+        }
+        #map-event-overlay .map-event-choice:hover { background:rgba(245,158,11,.18); transform:translateY(-1px); }
+        #map-event-overlay .map-event-choice:focus-visible { outline:2px solid var(--gold-accent); outline-offset:2px; }
+        @media (max-width:600px) {
+            #map-event-overlay .map-event-choices { grid-template-columns:1fr; }
+        }
         .event-title { color:var(--gold-accent); font-weight:900; font-size:.8rem; }
         .event-desc { color:var(--text-muted); font-size:.68rem; margin:3px 0 6px; }
         .event-choices { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
@@ -234,7 +260,7 @@
 
     <header>
         <div class="title-group">
-            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局V2：<span>反攻戰術地圖</span></h1>
+            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局：<span>反攻戰術地圖</span></h1>
             <div class="subtitle">完全靜態鎖定 / 50% 畫面視角</div>
         </div>
         <div class="mode-selector">
@@ -273,6 +299,12 @@
         <!-- 50% 高度 + 禁滑動放大縮小地圖 -->
         <div id="map-container">
             <div id="map"></div>
+            <div id="map-event-overlay" role="dialog" aria-live="assertive" aria-modal="false">
+                <div class="map-event-tag">EMERGENCY MISSION</div>
+                <div id="map-event-title" class="map-event-title"></div>
+                <div id="map-event-desc" class="map-event-desc"></div>
+                <div id="map-event-choices" class="map-event-choices"></div>
+            </div>
         </div>
 
         <div class="bottom-grid">
@@ -874,27 +906,51 @@
             const event = nextEventHint || getRandomEvent();
             nextEventHint = null;
 
+            // 地圖中央顯示緊急任務，讓玩家不需要離開戰場畫面即可處理事件。
+            const mapOverlay = document.getElementById('map-event-overlay');
+            const mapTitle = document.getElementById('map-event-title');
+            const mapDesc = document.getElementById('map-event-desc');
+            const mapChoices = document.getElementById('map-event-choices');
+            if (mapOverlay && mapTitle && mapDesc && mapChoices) {
+                mapTitle.textContent = event.title;
+                mapDesc.textContent = event.desc;
+                mapChoices.innerHTML = '';
+
+                [event.a, event.b].forEach(choice => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'map-event-choice';
+                    button.textContent = choice.text;
+                    button.addEventListener('click', () => resolveEmergencyEvent(event, choice));
+                    mapChoices.appendChild(button);
+                });
+                mapOverlay.style.display = 'block';
+            }
+
+            // 保留右側事件欄同步顯示，方便玩家在小螢幕或關閉地圖效果時仍能看到事件。
             document.getElementById('event-title').textContent = event.title;
             document.getElementById('event-desc').textContent = event.desc;
             const choices = document.getElementById('event-choices');
             choices.innerHTML = '';
-
             const a = document.createElement('button');
             a.className = 'event-choice'; a.textContent = event.a.text;
             a.onclick = () => resolveEmergencyEvent(event, event.a);
             const b = document.createElement('button');
             b.className = 'event-choice'; b.textContent = event.b.text;
             b.onclick = () => resolveEmergencyEvent(event, event.b);
-
             choices.append(a,b);
             document.getElementById('event-banner').style.display = 'block';
+
             log(`⚠️ ${event.title} 請立即二選一！`);
             updateActionButtonStates();
         }
 
         function resolveEmergencyEvent(event, choice) {
-            choice.fn();
+            if (!pendingEvent || gameOver) return;
             pendingEvent = false;
+            const mapOverlay = document.getElementById('map-event-overlay');
+            if (mapOverlay) mapOverlay.style.display = 'none';
+            choice.fn();
             document.getElementById('event-banner').style.display = 'none';
             updateActionButtonStates();
 
@@ -1384,6 +1440,10 @@
         }
 
         function resetGameData() {
+            const mapOverlay = document.getElementById('map-event-overlay');
+            if (mapOverlay) mapOverlay.style.display = 'none';
+            const eventBanner = document.getElementById('event-banner');
+            if (eventBanner) eventBanner.style.display = 'none';
             isAiThinking = false;
             gameOver = false;
             gameState = { turn: 'KMT', ap: getMaxAP('KMT'), round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
