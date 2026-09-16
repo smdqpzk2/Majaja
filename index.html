@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大戰局：歷史反攻地圖 - P2P-V1 修正版</title>
+    <title>大戰局：歷史反攻地圖 - P2V-V2 修正版</title>
     <!-- FontAwesome 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Leaflet CSS & JS -->
@@ -354,11 +354,13 @@
                     <span><i class="fa-solid fa-terminal"></i> 戰術動態 Log</span>
                     <span style="font-size: 0.7rem; color: var(--text-muted);" id="round-indicator">ROUND 1</span>
                 </div>
+                <div style="font-size:.66rem;color:#fbbf24;margin:2px 0 5px;">共軍優勢：4 區開局｜4 AP｜高耐久｜縱深防禦｜北京總部護衛</div>
                 <div class="morale-row"><span>雙方士氣</span><span id="morale-label">50 / 50</span></div>
                 <div class="morale-bar"><div id="morale-fill" class="morale-fill"></div></div>
                 <div id="hq-panel" class="event-banner" style="display:block; border-color:rgba(0,243,255,.45); background:rgba(0,243,255,.05);">
                     <div class="event-title" style="color:var(--neon-blue);">🏛️ 雙方總部</div>
                     <div id="hq-status" class="event-desc"></div>
+                    <div style="font-size:.66rem;color:#fbbf24;margin-top:4px;">⚠ 共軍優勢規則：4 區開局、北京總部 220 HP、縱深防禦與額外 AP。</div>
                 </div>
                 <div id="event-banner" class="event-banner">
                     <div id="event-title" class="event-title"></div>
@@ -372,28 +374,37 @@
 
     <script>
         const initialRegions = [
-            { id: 'northeast', name: '東北 (瀋陽)', owner: 'KMT', hp: 100, maxHp: 100, lat: 41.83, lng: 123.43 },
-            { id: 'north', name: '華北 (北京)', owner: 'CPC', hp: 100, maxHp: 100, lat: 39.90, lng: 116.40 },
-            { id: 'east', name: '華東 (南京)', owner: 'KMT', hp: 100, maxHp: 100, lat: 32.06, lng: 118.79 },
-            { id: 'south', name: '華南 (廣州)', owner: 'CPC', hp: 100, maxHp: 100, lat: 23.12, lng: 113.26 },
-            { id: 'southwest', name: '大西南 (成都)', owner: 'KMT', hp: 100, maxHp: 100, lat: 30.57, lng: 104.06 },
-            { id: 'taiwan', name: '台灣 (台北基地)', owner: 'KMT', hp: 100, maxHp: 100, lat: 25.03, lng: 121.56 }
+            // 共軍開局控制 4 個戰區，並擁有較高的區域耐久與「縱深防禦」層數。
+            { id: 'northeast', name: '東北 (瀋陽)', owner: 'CPC', hp: 115, maxHp: 115, fortress: 2, lat: 41.83, lng: 123.43 },
+            { id: 'north', name: '華北 (北京)', owner: 'CPC', hp: 120, maxHp: 120, fortress: 3, lat: 39.90, lng: 116.40 },
+            { id: 'east', name: '華東 (南京)', owner: 'CPC', hp: 115, maxHp: 115, fortress: 2, lat: 32.06, lng: 118.79 },
+            { id: 'south', name: '華南 (廣州)', owner: 'CPC', hp: 115, maxHp: 115, fortress: 2, lat: 23.12, lng: 113.26 },
+            { id: 'southwest', name: '大西南 (成都)', owner: 'KMT', hp: 100, maxHp: 100, fortress: 0, lat: 30.57, lng: 104.06 },
+            { id: 'taiwan', name: '台灣 (台北基地)', owner: 'KMT', hp: 100, maxHp: 100, fortress: 0, lat: 25.03, lng: 121.56 }
         ];
 
         // 雙方總部：國軍總部固定在台灣，共軍總部固定在北京。
         const headquarters = {
             KMT: { regionId: 'taiwan', name: '國軍總部', location: '台灣（台北）', lat: 25.03, lng: 121.56, hp: 180, maxHp: 180 },
-            CPC: { regionId: 'north', name: '共軍總部', location: '北京', lat: 39.90, lng: 116.40, hp: 180, maxHp: 180 }
+            CPC: { regionId: 'north', name: '共軍總部', location: '北京', lat: 39.90, lng: 116.40, hp: 220, maxHp: 220 }
         };
 
         let map, markers = {}, polylineGroup = null;
         let gameMode = 'AI';
         const MAX_AP = 3;
-        let gameState = { turn: 'KMT', ap: MAX_AP, round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
+        const CPC_MAX_AP = 4;
+        const MAX_SP = 3;
+        const CPC_MAX_SP = 5;
+        function getMaxAP(side) { return side === 'CPC' ? CPC_MAX_AP : MAX_AP; }
+        function getMaxSP(side) { return side === 'CPC' ? CPC_MAX_SP : MAX_SP; }
+        let gameState = { turn: 'KMT', ap: getMaxAP('KMT'), round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
         let selectedRegionId = null;
         let myRole = 'KMT';
         let peer = null, conn = null, isAiThinking = false, gameOver = false, pendingPeerId = null;
         let reconnectTimer = null, peerConnecting = false, connectionTimeout = null;
+        let specialState = { KMT: { sp: 2, morale: 50, shield: 0, surge: 0 }, CPC: { sp: 3, morale: 55, shield: 0, surge: 0 } };
+        let pendingEvent = false, nextEventHint = null;
+        let hqState = JSON.parse(JSON.stringify(headquarters));
 
         function initMap() {
             // 初始化靜態鎖定地圖 (絕對禁止移動與縮放)
@@ -482,7 +493,7 @@
 
             const apContainer = document.getElementById('ap-dots');
             apContainer.innerHTML = '';
-            for (let i = 0; i < MAX_AP; i++) {
+            for (let i = 0; i < getMaxAP(gameState.turn); i++) {
                 const dot = document.createElement('div');
                 dot.className = `ap-dot ${i < gameState.ap ? 'active' : ''}`;
                 apContainer.appendChild(dot);
@@ -496,7 +507,7 @@
             if (selectedRegionId) {
                 const region = gameState.regions.find(r => r.id === selectedRegionId);
                 targetName.innerText = `${region.name}`;
-                targetHp.innerText = `HP: ${Math.max(0, region.hp)}/${region.maxHp}`;
+                targetHp.innerText = `HP: ${Math.max(0, region.hp)}/${region.maxHp}${region.owner === 'CPC' ? ` · 縱深 ${region.fortress || 0}` : ''}`;
             } else {
                 targetName.innerText = "請選擇區域";
                 targetHp.innerText = "HP: --/--";
@@ -577,6 +588,16 @@
                     specialState[myRole].surge = 0;
                     logMsg += "【戰術脈衝】 ";
                 }
+                if (region.owner === 'CPC' && (region.fortress || 0) > 0) {
+                    damage = Math.max(1, damage - 8);
+                    region.fortress -= 1;
+                    logMsg += '【縱深防禦 -8】 ';
+                }
+                if (region.owner === 'CPC' && (region.fortress || 0) > 0) {
+                    damage = Math.max(1, damage - 8);
+                    region.fortress -= 1;
+                    logMsg += '【縱深防禦 -8】 ';
+                }
                 damage = Math.max(1, damage - specialState[region.owner].shield);
                 specialState[region.owner].shield = 0;
                 region.hp -= damage;
@@ -654,9 +675,17 @@
             if (gameOver || gameState.turn !== myRole || isAiThinking || pendingEvent) return;
 
             gameState.turn = gameState.turn === 'KMT' ? 'CPC' : 'KMT';
-            gameState.ap = MAX_AP;
+            gameState.ap = getMaxAP(gameState.turn);
             gameState.round += 1;
-            specialState[gameState.turn].sp = Math.min(MAX_SP, specialState[gameState.turn].sp + 1);
+            specialState[gameState.turn].sp = Math.min(getMaxSP(gameState.turn), specialState[gameState.turn].sp + 1);
+            if (gameState.turn === 'CPC') {
+                // 共軍的後方補給：每個共軍區域少量恢復，並重新建立部分縱深防禦。
+                gameState.regions.filter(r => r.owner === 'CPC').forEach(r => {
+                    r.hp = Math.min(r.maxHp, r.hp + 5);
+                    r.fortress = Math.min(3, (r.fortress || 0) + 1);
+                });
+                log('【共軍規則】後方補給啟動：共軍區域 +5 HP，部分縱深防禦恢復。');
+            }
 
             log(`--- 切換至 [${gameState.turn === 'KMT' ? '國軍' : '共軍'}] 行動階段 ---`);
             renderMapElements();
@@ -677,7 +706,12 @@
             updateHUD();
             updateActionButtonStates();
 
-            let aiAp = MAX_AP;
+            let aiAp = getMaxAP('CPC');
+            // 共軍回合開始：額外恢復縱深防禦，讓玩家需要持續突破。
+            gameState.regions.filter(r => r.owner === 'CPC').forEach(r => {
+                r.fortress = Math.min(3, (r.fortress || 0) + 1);
+                r.hp = Math.min(r.maxHp, r.hp + 5);
+            });
             const aiInterval = setInterval(() => {
                 const kmtRegions = gameState.regions.filter(r => r.owner === 'KMT');
                 const cpcRegions = gameState.regions.filter(r => r.owner === 'CPC');
@@ -685,7 +719,7 @@
                 if (aiAp >= 2 && kmtRegions.length > 0) {
                     kmtRegions.sort((a, b) => a.hp - b.hp);
                     const target = kmtRegions[0];
-                    let dmg = 27 + Math.floor(Math.random() * 16);
+                    let dmg = 32 + Math.floor(Math.random() * 17);
                     if (specialState.CPC.surge > 0) { dmg += specialState.CPC.surge; specialState.CPC.surge = 0; }
                     dmg = Math.max(1, dmg - specialState.KMT.shield);
                     specialState.KMT.shield = 0;
@@ -717,17 +751,17 @@
                 }
 
                 // AI 偶爾使用特殊技能，效果與玩家對稱。
-                if (specialState.CPC.sp > 0 && Math.random() < 0.22) {
+                if (specialState.CPC.sp > 0 && Math.random() < 0.40) {
                     const roll = Math.random();
                     if (roll < 0.34) {
-                        specialState.CPC.sp--; specialState.CPC.surge = 12;
+                        specialState.CPC.sp--; specialState.CPC.surge = 16;
                         log(`AI 使用【戰術脈衝】`);
                     } else if (roll < 0.67) {
-                        specialState.CPC.sp--; specialState.CPC.shield = 20;
+                        specialState.CPC.sp--; specialState.CPC.shield = 30;
                         log(`AI 使用【緊急防護】`);
                     } else if (specialState.CPC.sp >= 2) {
                         specialState.CPC.sp -= 2;
-                        cpcRegions.forEach(r => r.hp = Math.min(r.maxHp, r.hp + 10));
+                        cpcRegions.forEach(r => r.hp = Math.min(r.maxHp, r.hp + 15));
                         log(`AI 使用【全線集結】`);
                     }
                 }
@@ -738,7 +772,7 @@
                     clearInterval(aiInterval);
                     gameState.turn = 'KMT';
                     gameState.ap = MAX_AP;
-                    specialState.KMT.sp = Math.min(MAX_SP, specialState.KMT.sp + 1);
+                    specialState.KMT.sp = Math.min(getMaxSP('KMT'), specialState.KMT.sp + 1);
                     isAiThinking = false;
                     log(`--- 電腦 AI 結束回合，輪至你的階段 ---`);
                     renderMapElements();
@@ -763,15 +797,15 @@
             side.sp -= costs[type];
 
             if (type === 'SURGE') {
-                side.surge = 12;
+                side.surge = myRole === 'CPC' ? 16 : 12;
                 changeMorale(myRole, 5);
                 log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【戰術脈衝】：下一次攻擊 +12。`);
             } else if (type === 'SHIELD') {
-                side.shield = 20;
+                side.shield = myRole === 'CPC' ? 30 : 20;
                 log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【緊急防護】：下一次受擊減免 20。`);
             } else if (type === 'RALLY') {
                 gameState.regions.filter(r => r.owner === myRole)
-                    .forEach(r => r.hp = Math.min(r.maxHp, r.hp + 10));
+                    .forEach(r => r.hp = Math.min(r.maxHp, r.hp + (myRole === 'CPC' ? 15 : 10)));
                 changeMorale(myRole, 8);
                 log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【全線集結】：全線 +10 HP。`);
             } else if (type === 'SCAN') {
@@ -799,7 +833,7 @@
                     log('事件選擇 A：前線補給完成。');
                 }},
                 b:{text:'B：保存資源 +1 SP', fn:()=> {
-                    specialState[myRole].sp=Math.min(MAX_SP,specialState[myRole].sp+1);
+                    specialState[myRole].sp=Math.min(getMaxSP(myRole),specialState[myRole].sp+1);
                     log('事件選擇 B：保存資源，特殊技能點 +1。');
                 }}
             },
@@ -887,6 +921,38 @@
             num.style.top = `${point.y}px`;
             document.getElementById('map-container').appendChild(num);
             setTimeout(() => num.remove(), 800);
+        }
+
+        function updateHQStatus() {
+            const el = document.getElementById('hq-status');
+            if (!el) return;
+            const k = hqState.KMT, c = hqState.CPC;
+            el.innerHTML = `國軍總部：${k.location} HP ${Math.max(0,k.hp)}/${k.maxHp}<br>共軍總部：${c.location} HP ${Math.max(0,c.hp)}/${c.maxHp}`;
+        }
+
+        function renderHeadquarters() {
+            updateHQStatus();
+        }
+
+        function damageHQ(side, amount) {
+            if (!hqState[side] || hqState[side].hp <= 0) return;
+            if (side === 'CPC') {
+                const mainlandLost = gameState.regions.filter(r => r.id !== 'taiwan' && r.owner === 'KMT').length;
+                if (mainlandLost < 2) {
+                    amount = Math.max(1, Math.floor(amount * 0.5));
+                    log('【北京總部護衛】共軍尚保有大部分縱深，總部傷害減半。');
+                }
+            }
+            hqState[side].hp = Math.max(0, hqState[side].hp - amount);
+            log(`【${hqState[side].name}】受到 ${amount} 點戰局傷害。`);
+            updateHQStatus();
+            if (hqState[side].hp <= 0) {
+                gameOver = true;
+                isAiThinking = false;
+                alert(`【總部失守】${hqState[side].name} 防線崩潰，戰局結束！`);
+                updateHUD();
+                updateActionButtonStates();
+            }
         }
 
         function checkWin() {
@@ -1320,10 +1386,10 @@
         function resetGameData() {
             isAiThinking = false;
             gameOver = false;
-            gameState = { turn: 'KMT', ap: MAX_AP, round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
+            gameState = { turn: 'KMT', ap: getMaxAP('KMT'), round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
             specialState = {
                 KMT: { sp: 2, morale: 50, shield: 0, surge: 0 },
-                CPC: { sp: 2, morale: 50, shield: 0, surge: 0 }
+                CPC: { sp: 3, morale: 55, shield: 0, surge: 0 }
             };
             pendingEvent = false;
             nextEventHint = null;
@@ -1334,6 +1400,7 @@
             renderMapElements();
             updateActionButtonStates();
             log(`戰局已恢復初始狀態`);
+            log('【難度規則】共軍 4 區開局、區域耐久較高、每回合 4 AP，並有縱深防禦。');
         }
 
         function log(msg) {
