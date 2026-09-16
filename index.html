@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>大戰局：歷史反攻地圖 - P2P 修正版</title>
+    <title>大戰局：歷史反攻地圖 - P2P-V1 修正版</title>
     <!-- FontAwesome 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Leaflet CSS & JS -->
@@ -161,7 +161,34 @@
         .action-card-btn:disabled { opacity: 0.35; cursor: not-allowed; border-color: transparent; }
         .action-card-btn .btn-title { font-weight: bold; font-size: 0.78rem; display: flex; justify-content: space-between; }
         .action-card-btn .btn-cost { font-size: 0.65rem; color: var(--gold-accent); }
-        .action-card-btn .btn-desc { font-size: 0.65rem; color: var(--text-muted); }
+        .action-card-btn .btn-desc { font-size: 0.65rem; color: var(--text-muted); }        .action-card-btn.skill-ready { border-color: var(--gold-accent); box-shadow: 0 0 8px rgba(245,158,11,0.18); }
+        .event-banner {
+            display:none; margin-top:6px; padding:8px; border:1px solid var(--gold-accent);
+            border-radius:6px; background:rgba(245,158,11,0.10); color:#fff;
+        }
+        .event-title { color:var(--gold-accent); font-weight:900; font-size:.8rem; }
+        .event-desc { color:var(--text-muted); font-size:.68rem; margin:3px 0 6px; }
+        .event-choices { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+        .event-choice {
+            background:#111827; border:1px solid rgba(245,158,11,.45); color:#fff;
+            border-radius:5px; padding:6px; cursor:pointer; font-size:.7rem;
+        }
+        .event-choice:hover { background:rgba(245,158,11,.18); }
+        .hq-marker {
+            width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+            font-size:18px; font-weight:900; border:2px solid currentColor; background:rgba(0,0,0,.88);
+            box-shadow:0 0 14px currentColor; text-shadow:0 0 8px currentColor;
+        }
+        .hq-label {
+            background:rgba(0,0,0,.86); border:1px solid currentColor; color:#fff; padding:3px 6px;
+            border-radius:4px; font-weight:800; font-size:11px; white-space:nowrap;
+        }
+        .hq-health { font-size:10px; color:#fff; margin-top:2px; }
+
+        .morale-row { font-size:.68rem; color:var(--text-muted); display:flex; justify-content:space-between; }
+        .morale-bar { height:5px; background:#1e293b; border-radius:5px; overflow:hidden; margin-top:3px; }
+        .morale-fill { height:100%; width:50%; background:linear-gradient(90deg,#f43f5e,#f59e0b,#22c55e); transition:width .25s; }
+
 
         #log-window {
             height: 95px; background: rgba(5, 8, 12, 0.95);
@@ -278,6 +305,29 @@
                     </button>
                 </div>
 
+                <div class="card-header" style="margin-top:2px;">
+                    <span><i class="fa-solid fa-bolt"></i> 特殊技能</span>
+                    <span id="skill-points" style="color:var(--gold-accent);">SP: 2</span>
+                </div>
+                <div class="actions-grid">
+                    <button class="action-card-btn" id="skill-surge" onclick="useSpecialSkill('SURGE')">
+                        <div class="btn-title"><span><i class="fa-solid fa-bolt"></i> 戰術脈衝</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">本回合下一次攻擊 +12 傷害，並恢復 5 士氣</div>
+                    </button>
+                    <button class="action-card-btn" id="skill-shield" onclick="useSpecialSkill('SHIELD')">
+                        <div class="btn-title"><span><i class="fa-solid fa-shield-halved"></i> 緊急防護</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">選定己方區域獲得 20 點臨時防護</div>
+                    </button>
+                    <button class="action-card-btn" id="skill-rally" onclick="useSpecialSkill('RALLY')">
+                        <div class="btn-title"><span><i class="fa-solid fa-flag"></i> 全線集結</span><span class="btn-cost">2 SP</span></div>
+                        <div class="btn-desc">所有己方區域 +10 HP，上限不變</div>
+                    </button>
+                    <button class="action-card-btn" id="skill-scan" onclick="useSpecialSkill('SCAN')">
+                        <div class="btn-title"><span><i class="fa-solid fa-eye"></i> 戰術預判</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">查看下一回合事件提示，並獲得 1 AP</div>
+                    </button>
+                </div>
+
                 <div id="p2p-panel" style="display: none; flex-direction: column; gap:4px; border-top:1px solid rgba(255,255,255,0.1); padding-top:6px;">
                     <div style="font-size:0.7rem; color:var(--gold-accent);">
                         自訂房間 ID：
@@ -304,6 +354,17 @@
                     <span><i class="fa-solid fa-terminal"></i> 戰術動態 Log</span>
                     <span style="font-size: 0.7rem; color: var(--text-muted);" id="round-indicator">ROUND 1</span>
                 </div>
+                <div class="morale-row"><span>雙方士氣</span><span id="morale-label">50 / 50</span></div>
+                <div class="morale-bar"><div id="morale-fill" class="morale-fill"></div></div>
+                <div id="hq-panel" class="event-banner" style="display:block; border-color:rgba(0,243,255,.45); background:rgba(0,243,255,.05);">
+                    <div class="event-title" style="color:var(--neon-blue);">🏛️ 雙方總部</div>
+                    <div id="hq-status" class="event-desc"></div>
+                </div>
+                <div id="event-banner" class="event-banner">
+                    <div id="event-title" class="event-title"></div>
+                    <div id="event-desc" class="event-desc"></div>
+                    <div id="event-choices" class="event-choices"></div>
+                </div>
                 <div id="log-window"></div>
             </div>
         </div>
@@ -311,13 +372,19 @@
 
     <script>
         const initialRegions = [
-            { id: 'northeast', name: '東北 (瀋陽)', owner: 'CPC', hp: 100, maxHp: 100, lat: 41.83, lng: 123.43 },
+            { id: 'northeast', name: '東北 (瀋陽)', owner: 'KMT', hp: 100, maxHp: 100, lat: 41.83, lng: 123.43 },
             { id: 'north', name: '華北 (北京)', owner: 'CPC', hp: 100, maxHp: 100, lat: 39.90, lng: 116.40 },
-            { id: 'east', name: '華東 (南京)', owner: 'CPC', hp: 100, maxHp: 100, lat: 32.06, lng: 118.79 },
+            { id: 'east', name: '華東 (南京)', owner: 'KMT', hp: 100, maxHp: 100, lat: 32.06, lng: 118.79 },
             { id: 'south', name: '華南 (廣州)', owner: 'CPC', hp: 100, maxHp: 100, lat: 23.12, lng: 113.26 },
-            { id: 'southwest', name: '大西南 (成都)', owner: 'CPC', hp: 100, maxHp: 100, lat: 30.57, lng: 104.06 },
+            { id: 'southwest', name: '大西南 (成都)', owner: 'KMT', hp: 100, maxHp: 100, lat: 30.57, lng: 104.06 },
             { id: 'taiwan', name: '台灣 (台北基地)', owner: 'KMT', hp: 100, maxHp: 100, lat: 25.03, lng: 121.56 }
         ];
+
+        // 雙方總部：國軍總部固定在台灣，共軍總部固定在北京。
+        const headquarters = {
+            KMT: { regionId: 'taiwan', name: '國軍總部', location: '台灣（台北）', lat: 25.03, lng: 121.56, hp: 180, maxHp: 180 },
+            CPC: { regionId: 'north', name: '共軍總部', location: '北京', lat: 39.90, lng: 116.40, hp: 180, maxHp: 180 }
+        };
 
         let map, markers = {}, polylineGroup = null;
         let gameMode = 'AI';
@@ -395,7 +462,8 @@
             });
 
             updateHUD();
-        }
+        
+            renderHeadquarters();}
 
         function updateHUD() {
             const isMyTurn = gameState.turn === myRole;
@@ -436,9 +504,8 @@
         }
 
         function updateActionButtonStates() {
-            const isMyTurn = gameState.turn === myRole && !isAiThinking && !gameOver;
+            const isMyTurn = gameState.turn === myRole && !isAiThinking && !gameOver && !pendingEvent;
             const region = gameState.regions.find(r => r.id === selectedRegionId);
-
             const btnAttack = document.getElementById('act-attack');
             const btnRaid = document.getElementById('act-raid');
             const btnFortify = document.getElementById('act-fortify');
@@ -446,69 +513,121 @@
 
             if (!region || !isMyTurn) {
                 [btnAttack, btnRaid, btnFortify, btnConscript].forEach(btn => btn.disabled = true);
-                return;
+            } else {
+                const isEnemy = region.owner !== myRole;
+                btnAttack.disabled = !isEnemy || gameState.ap < 2;
+                btnRaid.disabled = !isEnemy || gameState.ap < 1;
+                btnFortify.disabled = isEnemy || gameState.ap < 1;
+                btnConscript.disabled = isEnemy || gameState.ap < 2;
             }
 
-            const isEnemy = region.owner !== myRole;
-            btnAttack.disabled = !isEnemy || gameState.ap < 2;
-            btnRaid.disabled = !isEnemy || gameState.ap < 1;
-            btnFortify.disabled = isEnemy || gameState.ap < 1;
-            btnConscript.disabled = isEnemy || gameState.ap < 2;
+            updateSkillButtons();
+            updateMoraleUI();
+        }
+
+        function updateSkillButtons() {
+            const side = specialState[myRole];
+            const active = gameState.turn === myRole && !isAiThinking && !gameOver && !pendingEvent;
+            const ids = ['skill-surge','skill-shield','skill-rally','skill-scan'];
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !active;
+            });
+            const costs = { 'skill-surge':1, 'skill-shield':1, 'skill-rally':2, 'skill-scan':1 };
+            ids.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = el.disabled || side.sp < costs[id];
+            });
+            const spEl = document.getElementById('skill-points');
+            if (spEl) spEl.textContent = `SP: ${side.sp}`;
+        }
+
+        function updateMoraleUI() {
+            const k = specialState.KMT.morale, c = specialState.CPC.morale;
+            const label = document.getElementById('morale-label');
+            const fill = document.getElementById('morale-fill');
+            if (label) label.textContent = `國軍 ${k} / 共軍 ${c}`;
+            if (fill) fill.style.width = `${Math.max(5, Math.min(95, 50 + (k-c)/2))}%`;
+        }
+
+        function changeMorale(side, delta) {
+            specialState[side].morale = Math.max(0, Math.min(100, specialState[side].morale + delta));
+            updateMoraleUI();
         }
 
         function executeTacticalAction(type) {
-            if (gameOver || gameState.turn !== myRole || isAiThinking || !selectedRegionId) return;
-
+            if (gameOver || gameState.turn !== myRole || isAiThinking || !selectedRegionId || pendingEvent) return;
             const region = gameState.regions.find(r => r.id === selectedRegionId);
             if (!region) return;
 
             const costs = { ATTACK: 2, RAID: 1, FORTIFY: 1, CONSCRIPT: 2 };
-            const apCostCheck = costs[type];
-            if (!apCostCheck || gameState.ap < apCostCheck) return;
+            const apCost = costs[type];
+            if (!apCost || gameState.ap < apCost) return;
 
             const isEnemy = region.owner !== myRole;
             if ((type === 'ATTACK' || type === 'RAID') && !isEnemy) return;
             if ((type === 'FORTIFY' || type === 'CONSCRIPT') && isEnemy) return;
 
-            let logMsg = ``, animText = "", animColor = "#f43f5e", apCost = 0;
+            let logMsg = "", animText = "", animColor = "#f43f5e";
 
             if (type === 'ATTACK') {
-                apCost = 2;
-                const damage = Math.floor(Math.random() * 21) + 25;
+                let damage = Math.floor(Math.random() * 16) + 27;
+                if (specialState[myRole].surge > 0) {
+                    damage += specialState[myRole].surge;
+                    specialState[myRole].surge = 0;
+                    logMsg += "【戰術脈衝】 ";
+                }
+                damage = Math.max(1, damage - specialState[region.owner].shield);
+                specialState[region.owner].shield = 0;
+                region.hp -= damage;
+                const targetSide = region.owner;
+                if (headquarters[targetSide] && headquarters[targetSide].regionId === region.id) {
+                    damageHQ(targetSide, Math.ceil(damage * 0.45));
+                }
+                animText = `-${damage}`;
+                logMsg += `${myRole === 'KMT' ? '國軍' : '共軍'} 強襲 [${region.name}] -${damage} HP`;
+                changeMorale(myRole, 3);
+                changeMorale(region.owner, -3);
+            } else if (type === 'RAID') {
+                let damage = Math.random() < 0.35 ? 48 : 18;
+                if (specialState[myRole].surge > 0) {
+                    damage += specialState[myRole].surge;
+                    specialState[myRole].surge = 0;
+                    logMsg += "【戰術脈衝】 ";
+                }
+                damage = Math.max(1, damage - specialState[region.owner].shield);
+                specialState[region.owner].shield = 0;
                 region.hp -= damage;
                 animText = `-${damage}`;
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 強襲 [${region.name}] -${damage} HP`;
-            } else if (type === 'RAID') {
-                apCost = 1;
-                const isCrit = Math.random() < 0.35;
-                const damage = isCrit ? 50 : 15;
-                region.hp -= damage;
-                animText = isCrit ? `暴擊 -${damage}` : `奇襲 -${damage}`;
                 animColor = "#a855f7";
-                logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 奇襲 [${region.name}] ${isCrit ? '(暴擊!)' : ''} -${damage} HP`;
+                logMsg += `${myRole === 'KMT' ? '國軍' : '共軍'} 奇襲 [${region.name}] -${damage} HP`;
+                changeMorale(myRole, 2);
+                changeMorale(region.owner, -2);
             } else if (type === 'FORTIFY') {
-                apCost = 1;
                 region.hp = Math.min(region.maxHp, region.hp + 25);
                 animText = `+25`; animColor = "#22c55e";
                 logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} 加固 [${region.name}] +25 HP`;
+                changeMorale(myRole, 2);
             } else if (type === 'CONSCRIPT') {
-                apCost = 2;
                 region.maxHp += 20; region.hp += 20;
                 animText = `上限+20`; animColor = "#38bdf8";
                 logMsg = `${myRole === 'KMT' ? '國軍' : '共軍'} [${region.name}] 徵兵，上限提升`;
+                changeMorale(myRole, 1);
             }
 
             gameState.ap -= apCost;
 
             if (region.hp <= 0) {
+                const oldOwner = region.owner;
                 region.hp = 50;
                 region.owner = myRole;
+                changeMorale(myRole, 8);
+                changeMorale(oldOwner, -8);
                 logMsg += ` (成功佔領該區域！)`;
             }
 
             showMapFloatingNum(region.lat, region.lng, animText, animColor);
             log(logMsg);
-
             renderMapElements();
             updateActionButtonStates();
 
@@ -516,28 +635,35 @@
                 sendData({
                     type: 'ACTION',
                     gameState: gameState,
+                    specialState: specialState,
+                    hqState: hqState,
                     msg: logMsg,
                     anim: { lat: region.lat, lng: region.lng, text: animText, color: animColor }
                 });
             }
 
             checkWin();
+
+            // 每次主要行動都有機率觸發突發事件，讓戰局有二選一。
+            if (!gameOver && Math.random() < 0.38) {
+                triggerEmergencyEvent();
+            }
         }
 
         function endTurn() {
-            if (gameOver || gameState.turn !== myRole || isAiThinking) return;
+            if (gameOver || gameState.turn !== myRole || isAiThinking || pendingEvent) return;
 
             gameState.turn = gameState.turn === 'KMT' ? 'CPC' : 'KMT';
             gameState.ap = MAX_AP;
             gameState.round += 1;
+            specialState[gameState.turn].sp = Math.min(MAX_SP, specialState[gameState.turn].sp + 1);
 
             log(`--- 切換至 [${gameState.turn === 'KMT' ? '國軍' : '共軍'}] 行動階段 ---`);
-
             renderMapElements();
             updateActionButtonStates();
 
             if (gameMode === 'P2P') {
-                sendData({ type: 'END_TURN', gameState: gameState, msg: `對手已結束回合` });
+                sendData({ type: 'END_TURN', gameState, specialState, hqState, msg: `對手已結束回合` });
             }
 
             if (gameMode === 'AI' && gameState.turn === 'CPC') {
@@ -552,7 +678,6 @@
             updateActionButtonStates();
 
             let aiAp = MAX_AP;
-
             const aiInterval = setInterval(() => {
                 const kmtRegions = gameState.regions.filter(r => r.owner === 'KMT');
                 const cpcRegions = gameState.regions.filter(r => r.owner === 'CPC');
@@ -560,24 +685,51 @@
                 if (aiAp >= 2 && kmtRegions.length > 0) {
                     kmtRegions.sort((a, b) => a.hp - b.hp);
                     const target = kmtRegions[0];
-                    const dmg = 30;
+                    let dmg = 27 + Math.floor(Math.random() * 16);
+                    if (specialState.CPC.surge > 0) { dmg += specialState.CPC.surge; specialState.CPC.surge = 0; }
+                    dmg = Math.max(1, dmg - specialState.KMT.shield);
+                    specialState.KMT.shield = 0;
                     target.hp -= dmg;
+                    if (headquarters.KMT.regionId === target.id) {
+                        damageHQ('KMT', Math.ceil(dmg * 0.45));
+                    }
                     aiAp -= 2;
+                    changeMorale('CPC', 3); changeMorale('KMT', -3);
 
                     showMapFloatingNum(target.lat, target.lng, `-${dmg}`, "#f43f5e");
                     let msg = `電腦 AI 強襲攻打 [${target.name}] (-${dmg})`;
-                    if (target.hp <= 0) { target.hp = 50; target.owner = 'CPC'; msg += ` (已被佔領)`; }
+                    if (target.hp <= 0) {
+                        target.hp = 50; target.owner = 'CPC';
+                        changeMorale('CPC', 8); changeMorale('KMT', -8);
+                        msg += ` (已佔領)`;
+                    }
                     log(msg);
                 } else if (aiAp >= 1 && cpcRegions.length > 0) {
                     cpcRegions.sort((a, b) => a.hp - b.hp);
                     const target = cpcRegions[0];
                     target.hp = Math.min(target.maxHp, target.hp + 25);
                     aiAp -= 1;
-
+                    changeMorale('CPC', 2);
                     showMapFloatingNum(target.lat, target.lng, `+25`, "#22c55e");
                     log(`電腦 AI 加固 [${target.name}] 防線`);
                 } else {
                     aiAp = 0;
+                }
+
+                // AI 偶爾使用特殊技能，效果與玩家對稱。
+                if (specialState.CPC.sp > 0 && Math.random() < 0.22) {
+                    const roll = Math.random();
+                    if (roll < 0.34) {
+                        specialState.CPC.sp--; specialState.CPC.surge = 12;
+                        log(`AI 使用【戰術脈衝】`);
+                    } else if (roll < 0.67) {
+                        specialState.CPC.sp--; specialState.CPC.shield = 20;
+                        log(`AI 使用【緊急防護】`);
+                    } else if (specialState.CPC.sp >= 2) {
+                        specialState.CPC.sp -= 2;
+                        cpcRegions.forEach(r => r.hp = Math.min(r.maxHp, r.hp + 10));
+                        log(`AI 使用【全線集結】`);
+                    }
                 }
 
                 renderMapElements();
@@ -586,13 +738,143 @@
                     clearInterval(aiInterval);
                     gameState.turn = 'KMT';
                     gameState.ap = MAX_AP;
-                    gameState.round += 1;
+                    specialState.KMT.sp = Math.min(MAX_SP, specialState.KMT.sp + 1);
                     isAiThinking = false;
                     log(`--- 電腦 AI 結束回合，輪至你的階段 ---`);
                     renderMapElements();
                     updateActionButtonStates();
+                    if (!gameOver && Math.random() < 0.45) triggerEmergencyEvent();
                 }
             }, 800);
+        }
+
+        function useSpecialSkill(type) {
+            if (gameOver || pendingEvent || gameState.turn !== myRole || isAiThinking) return;
+            const side = specialState[myRole];
+            const region = gameState.regions.find(r => r.id === selectedRegionId);
+            const costs = { SURGE:1, SHIELD:1, RALLY:2, SCAN:1 };
+            if (side.sp < costs[type]) return;
+
+            if ((type === 'SHIELD') && (!region || region.owner !== myRole)) {
+                log('【緊急防護】請先選擇己方區域。');
+                return;
+            }
+
+            side.sp -= costs[type];
+
+            if (type === 'SURGE') {
+                side.surge = 12;
+                changeMorale(myRole, 5);
+                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【戰術脈衝】：下一次攻擊 +12。`);
+            } else if (type === 'SHIELD') {
+                side.shield = 20;
+                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【緊急防護】：下一次受擊減免 20。`);
+            } else if (type === 'RALLY') {
+                gameState.regions.filter(r => r.owner === myRole)
+                    .forEach(r => r.hp = Math.min(r.maxHp, r.hp + 10));
+                changeMorale(myRole, 8);
+                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【全線集結】：全線 +10 HP。`);
+            } else if (type === 'SCAN') {
+                gameState.ap = Math.min(MAX_AP, gameState.ap + 1);
+                nextEventHint = getRandomEvent(true);
+                log(`【戰術預判】下一個突發事件提示：${nextEventHint.title}`);
+            }
+
+            renderMapElements();
+            updateActionButtonStates();
+
+            if (gameMode === 'P2P') {
+                sendData({ type:'SKILL', skill:type, gameState, specialState, msg:`對手使用特殊技能 ${type}` });
+            }
+        }
+
+        const emergencyEvents = [
+            {
+                title:'⚠️ 緊急補給：只能選一個！',
+                desc:'前線補給抵達，但資源有限。你要強化前線還是保存資源？',
+                a:{text:'A：前線補給 +25 HP', fn:()=> {
+                    const r = gameState.regions.find(x=>x.owner===myRole);
+                    if(r) r.hp=Math.min(r.maxHp,r.hp+25);
+                    changeMorale(myRole,4);
+                    log('事件選擇 A：前線補給完成。');
+                }},
+                b:{text:'B：保存資源 +1 SP', fn:()=> {
+                    specialState[myRole].sp=Math.min(MAX_SP,specialState[myRole].sp+1);
+                    log('事件選擇 B：保存資源，特殊技能點 +1。');
+                }}
+            },
+            {
+                title:'🛰️ 情報異常：立即決策！',
+                desc:'偵測到敵方調動。你可以冒險搶先行動，或穩住防線。',
+                a:{text:'A：快速反應 +1 AP', fn:()=> {
+                    gameState.ap=Math.min(MAX_AP,gameState.ap+1);
+                    changeMorale(myRole,3);
+                    log('事件選擇 A：快速反應，AP +1。');
+                }},
+                b:{text:'B：穩固陣線 +15 HP', fn:()=> {
+                    const r=gameState.regions.find(x=>x.owner===myRole);
+                    if(r) r.hp=Math.min(r.maxHp,r.hp+15);
+                    changeMorale(myRole,2);
+                    log('事件選擇 B：穩固陣線，前線 +15 HP。');
+                }}
+            },
+            {
+                title:'📡 通訊干擾：二選一',
+                desc:'短暫干擾影響指揮系統。你只能選擇一種應對方式。',
+                a:{text:'A：集中指揮，士氣 +8', fn:()=>{ changeMorale(myRole,8); log('事件選擇 A：集中指揮，士氣提升。'); }},
+                b:{text:'B：分散備援，所有己方 +8 HP', fn:()=>{
+                    gameState.regions.filter(r=>r.owner===myRole).forEach(r=>r.hp=Math.min(r.maxHp,r.hp+8));
+                    log('事件選擇 B：分散備援，所有己方區域 +8 HP。');
+                }}
+            }
+        ];
+
+        function getRandomEvent(preview=false) {
+            const e = emergencyEvents[Math.floor(Math.random()*emergencyEvents.length)];
+            return preview ? e : e;
+        }
+
+        function triggerEmergencyEvent() {
+            if (pendingEvent || gameOver) return;
+            pendingEvent = true;
+            const event = nextEventHint || getRandomEvent();
+            nextEventHint = null;
+
+            document.getElementById('event-title').textContent = event.title;
+            document.getElementById('event-desc').textContent = event.desc;
+            const choices = document.getElementById('event-choices');
+            choices.innerHTML = '';
+
+            const a = document.createElement('button');
+            a.className = 'event-choice'; a.textContent = event.a.text;
+            a.onclick = () => resolveEmergencyEvent(event, event.a);
+            const b = document.createElement('button');
+            b.className = 'event-choice'; b.textContent = event.b.text;
+            b.onclick = () => resolveEmergencyEvent(event, event.b);
+
+            choices.append(a,b);
+            document.getElementById('event-banner').style.display = 'block';
+            log(`⚠️ ${event.title} 請立即二選一！`);
+            updateActionButtonStates();
+        }
+
+        function resolveEmergencyEvent(event, choice) {
+            choice.fn();
+            pendingEvent = false;
+            document.getElementById('event-banner').style.display = 'none';
+            updateActionButtonStates();
+
+            if (gameMode === 'P2P') {
+                sendData({
+                    type:'EVENT_RESULT',
+                    gameState,
+                    specialState,
+                    hqState,
+                    msg:'對手完成突發事件選擇'
+                });
+            }
+            renderMapElements();
+            checkWin();
         }
 
         function showMapFloatingNum(lat, lng, text, color) {
@@ -925,12 +1207,16 @@
                     if (!data.gameState || !Array.isArray(data.gameState.regions)) return;
 
                     gameState = data.gameState;
+                    if (data.specialState) specialState = data.specialState;
+                    if (data.hqState) hqState = data.hqState;
                     gameOver = false;
                     log(`已同步戰局資料，你扮演 共軍`);
-                } else if (data.type === 'ACTION' || data.type === 'END_TURN') {
+                } else if (data.type === 'ACTION' || data.type === 'END_TURN' || data.type === 'SKILL' || data.type === 'EVENT_RESULT') {
                     if (!data.gameState || !Array.isArray(data.gameState.regions)) return;
 
                     gameState = data.gameState;
+                    if (data.specialState) specialState = data.specialState;
+                    if (data.hqState) hqState = data.hqState;
 
                     if (data.anim &&
                         Number.isFinite(data.anim.lat) &&
@@ -943,6 +1229,12 @@
                         );
                     }
 
+                    if (typeof data.msg === 'string') log(data.msg);
+                } else if (data.type === 'EVENT_RESULT') {
+                    if (data.specialState) specialState = data.specialState;
+                    pendingEvent = false;
+                    const banner = document.getElementById('event-banner');
+                    if (banner) banner.style.display = 'none';
                     if (typeof data.msg === 'string') log(data.msg);
                 } else if (data.type === 'RESET') {
                     alert("對手重置了戰局！");
@@ -1029,6 +1321,15 @@
             isAiThinking = false;
             gameOver = false;
             gameState = { turn: 'KMT', ap: MAX_AP, round: 1, regions: JSON.parse(JSON.stringify(initialRegions)) };
+            specialState = {
+                KMT: { sp: 2, morale: 50, shield: 0, surge: 0 },
+                CPC: { sp: 2, morale: 50, shield: 0, surge: 0 }
+            };
+            pendingEvent = false;
+            nextEventHint = null;
+            hqState = JSON.parse(JSON.stringify(headquarters));
+            const banner = document.getElementById('event-banner');
+            if (banner) banner.style.display = 'none';
             selectedRegionId = null;
             renderMapElements();
             updateActionButtonStates();
