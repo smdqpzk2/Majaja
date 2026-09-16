@@ -279,7 +279,7 @@
 
     <header>
         <div class="title-group">
-            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局V5：<span>反攻戰術地圖</span></h1>
+            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局：<span>反攻戰術地圖</span></h1>
             <div class="subtitle">完全靜態鎖定 / 50% 畫面視角</div>
         </div>
         <div class="mode-selector">
@@ -361,21 +361,21 @@
                     <span id="skill-points" style="color:var(--gold-accent);">SP: 2</span>
                 </div>
                 <div class="actions-grid">
-                    <button class="action-card-btn" id="skill-surge" onclick="useSpecialSkill('SURGE')">
-                        <div class="btn-title"><span><i class="fa-solid fa-bolt"></i> 戰術脈衝</span><span class="btn-cost">1 SP</span></div>
-                        <div class="btn-desc">本回合下一次攻擊 +12 傷害，並恢復 5 士氣</div>
+                    <button class="action-card-btn" id="skill-surge" onclick="useSpecialSkill('KMT_SHIELD')">
+                        <div class="btn-title"><span><i class="fa-solid fa-shield-halved"></i> 海峽防線</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">國軍專屬：下一次受擊減免 35，總部額外恢復 10 HP</div>
                     </button>
-                    <button class="action-card-btn" id="skill-shield" onclick="useSpecialSkill('SHIELD')">
-                        <div class="btn-title"><span><i class="fa-solid fa-shield-halved"></i> 緊急防護</span><span class="btn-cost">1 SP</span></div>
-                        <div class="btn-desc">選定己方區域獲得 20 點臨時防護</div>
+                    <button class="action-card-btn" id="skill-shield" onclick="useSpecialSkill('KMT_RAPID')">
+                        <div class="btn-title"><span><i class="fa-solid fa-forward"></i> 快速增援</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">國軍專屬：立即 +1 AP、士氣 +6</div>
                     </button>
-                    <button class="action-card-btn" id="skill-rally" onclick="useSpecialSkill('RALLY')">
-                        <div class="btn-title"><span><i class="fa-solid fa-flag"></i> 全線集結</span><span class="btn-cost">2 SP</span></div>
-                        <div class="btn-desc">所有己方區域 +10 HP，上限不變</div>
+                    <button class="action-card-btn" id="skill-rally" onclick="useSpecialSkill('KMT_ALLIED')">
+                        <div class="btn-title"><span><i class="fa-solid fa-satellite-dish"></i> 聯合情報</span><span class="btn-cost">1 SP</span></div>
+                        <div class="btn-desc">國軍專屬：預覽下一事件，並讓下一次攻擊 +8</div>
                     </button>
-                    <button class="action-card-btn" id="skill-scan" onclick="useSpecialSkill('SCAN')">
-                        <div class="btn-title"><span><i class="fa-solid fa-eye"></i> 戰術預判</span><span class="btn-cost">1 SP</span></div>
-                        <div class="btn-desc">查看下一回合事件提示，並獲得 1 AP</div>
+                    <button class="action-card-btn" id="skill-scan" onclick="useSpecialSkill('KMT_RALLY')">
+                        <div class="btn-title"><span><i class="fa-solid fa-flag"></i> 守土動員</span><span class="btn-cost">2 SP</span></div>
+                        <div class="btn-desc">國軍專屬：所有己方區域 +14 HP，士氣 +10</div>
                     </button>
                 </div>
 
@@ -405,13 +405,13 @@
                     <span><i class="fa-solid fa-terminal"></i> 戰術動態 Log</span>
                     <span style="font-size: 0.7rem; color: var(--text-muted);" id="round-indicator">ROUND 1</span>
                 </div>
-                <div style="font-size:.66rem;color:#fbbf24;margin:2px 0 5px;">公平模式：3 : 3 開局｜雙方 3 AP｜雙方同等 HP｜支援事件</div>
+                <div style="font-size:.66rem;color:#fbbf24;margin:2px 0 5px;">公平模式：3 : 3 開局｜雙方 3 AP｜基礎數值對稱｜陣營專屬技能｜支援事件</div>
                 <div class="morale-row"><span>雙方士氣</span><span id="morale-label">50 / 50</span></div>
                 <div class="morale-bar"><div id="morale-fill" class="morale-fill"></div></div>
                 <div id="hq-panel" class="event-banner" style="display:block; border-color:rgba(0,243,255,.45); background:rgba(0,243,255,.05);">
                     <div class="event-title" style="color:var(--neon-blue);">🏛️ 雙方總部</div>
                     <div id="hq-status" class="event-desc"></div>
-                    <div style="font-size:.66rem;color:#fbbf24;margin-top:4px;">⚖ 公平模式：雙方 3 區、3 AP、3 SP、總部 180 HP；支援事件依控制區域觸發。</div>
+                    <div style="font-size:.66rem;color:#fbbf24;margin-top:4px;">⚖ 平衡模式：基礎數值對稱；國軍有台灣防守與增援專長，共軍有縱深補給與全線動員專長。</div>
                 </div>
                 <div id="event-banner" class="event-banner">
                     <div id="event-title" class="event-title"></div>
@@ -591,17 +591,27 @@
             const side = specialState[myRole];
             const active = gameState.turn === myRole && !isAiThinking && !gameOver && !pendingEvent;
             const ids = ['skill-surge','skill-shield','skill-rally','skill-scan'];
-            ids.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.disabled = !active;
+            const defs = myRole === 'KMT' ? [
+                {id:'skill-surge', type:'KMT_SHIELD', title:'海峽防線', icon:'fa-shield-halved', cost:1, desc:'國軍專屬：下一次受擊減免 35，總部額外恢復 10 HP'},
+                {id:'skill-shield', type:'KMT_RAPID', title:'快速增援', icon:'fa-forward', cost:1, desc:'國軍專屬：立即 +1 AP、士氣 +6'},
+                {id:'skill-rally', type:'KMT_ALLIED', title:'聯合情報', icon:'fa-satellite-dish', cost:1, desc:'國軍專屬：預覽下一事件，並讓下一次攻擊 +8'},
+                {id:'skill-scan', type:'KMT_RALLY', title:'守土動員', icon:'fa-flag', cost:2, desc:'國軍專屬：所有己方區域 +14 HP，士氣 +10'}
+            ] : [
+                {id:'skill-surge', type:'CPC_PRESSURE', title:'縱深壓迫', icon:'fa-bolt', cost:1, desc:'共軍專屬：下一次攻擊 +16，並恢復 3 士氣'},
+                {id:'skill-shield', type:'CPC_RESERVE', title:'後方補給', icon:'fa-boxes-stacked', cost:1, desc:'共軍專屬：最低 HP 的己方區域 +30 HP'},
+                {id:'skill-rally', type:'CPC_MOBILIZE', title:'全線動員', icon:'fa-people-group', cost:2, desc:'共軍專屬：所有己方區域 +10 HP，並獲得 1 AP'},
+                {id:'skill-scan', type:'CPC_FORECAST', title:'戰區預判', icon:'fa-eye', cost:1, desc:'共軍專屬：預覽下一事件並恢復 5 士氣'}
+            ];
+            defs.forEach(d=>{
+                const el=document.getElementById(d.id);
+                if(!el) return;
+                el.onclick=()=>useSpecialSkill(d.type);
+                el.disabled=!active || side.sp<d.cost;
+                el.querySelector('.btn-title').innerHTML=`<span><i class="fa-solid ${d.icon}"></i> ${d.title}</span><span class="btn-cost">${d.cost} SP</span>`;
+                el.querySelector('.btn-desc').textContent=d.desc;
             });
-            const costs = { 'skill-surge':1, 'skill-shield':1, 'skill-rally':2, 'skill-scan':1 };
-            ids.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.disabled = el.disabled || side.sp < costs[id];
-            });
-            const spEl = document.getElementById('skill-points');
-            if (spEl) spEl.textContent = `SP: ${side.sp}`;
+            const spEl=document.getElementById('skill-points');
+            if(spEl) spEl.textContent=`${myRole==='KMT'?'國軍':'共軍'} SP: ${side.sp}`;
         }
 
         function updateMoraleUI() {
@@ -712,7 +722,7 @@
             checkWin();
 
             // 每次主要行動都有機率觸發突發事件，讓戰局有二選一。
-            if (!gameOver && Math.random() < 0.38) {
+            if (!gameOver && Math.random() < (myRole === 'KMT' ? 0.46 : 0.40)) {
                 triggerEmergencyEvent();
             }
         }
@@ -823,7 +833,7 @@
                     log(`--- 電腦 AI 結束回合，輪至你的階段 ---`);
                     renderMapElements();
                     updateActionButtonStates();
-                    if (!gameOver && Math.random() < 0.45) triggerEmergencyEvent();
+                    if (!gameOver && Math.random() < (gameState.turn === 'KMT' ? 0.52 : 0.45)) triggerEmergencyEvent();
                 }
             }, 800);
         }
@@ -831,41 +841,49 @@
         function useSpecialSkill(type) {
             if (gameOver || pendingEvent || gameState.turn !== myRole || isAiThinking) return;
             const side = specialState[myRole];
-            const region = gameState.regions.find(r => r.id === selectedRegionId);
-            const costs = { SURGE:1, SHIELD:1, RALLY:2, SCAN:1 };
-            if (side.sp < costs[type]) return;
-
-            if ((type === 'SHIELD') && (!region || region.owner !== myRole)) {
-                log('【緊急防護】請先選擇己方區域。');
-                return;
-            }
-
+            const costs = {KMT_SHIELD:1,KMT_RAPID:1,KMT_ALLIED:1,KMT_RALLY:2,CPC_PRESSURE:1,CPC_RESERVE:1,CPC_MOBILIZE:2,CPC_FORECAST:1};
+            if (!costs[type] || side.sp < costs[type]) return;
             side.sp -= costs[type];
 
-            if (type === 'SURGE') {
-                side.surge = 12;
-                changeMorale(myRole, 5);
-                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【戰術脈衝】：下一次攻擊 +12。`);
-            } else if (type === 'SHIELD') {
-                side.shield = 20;
-                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【緊急防護】：下一次受擊減免 20。`);
-            } else if (type === 'RALLY') {
-                gameState.regions.filter(r => r.owner === myRole)
-                    .forEach(r => r.hp = Math.min(r.maxHp, r.hp + 10));
-                changeMorale(myRole, 8);
-                log(`${myRole === 'KMT' ? '國軍' : '共軍'} 啟動【全線集結】：全線 +10 HP。`);
-            } else if (type === 'SCAN') {
-                gameState.ap = Math.min(getMaxAP(myRole), gameState.ap + 1);
-                nextEventHint = getRandomEvent(true);
-                log(`【戰術預判】下一個突發事件提示：${nextEventHint.title}`);
+            if(type==='KMT_SHIELD'){
+                side.shield=35;
+                if(headquarters.KMT) headquarters.KMT.hp=Math.min(headquarters.KMT.maxHp,headquarters.KMT.hp+10);
+                changeMorale('KMT',4);
+                log('🇹🇼 國軍【海峽防線】：下一次受擊 -35，台北總部 +10 HP。');
+            } else if(type==='KMT_RAPID'){
+                gameState.ap=Math.min(getMaxAP('KMT'),gameState.ap+1);
+                changeMorale('KMT',6);
+                log('🇹🇼 國軍【快速增援】：AP +1、士氣 +6。');
+            } else if(type==='KMT_ALLIED'){
+                side.surge=8;
+                nextEventHint=getRandomEvent(true);
+                changeMorale('KMT',3);
+                log(`🇹🇼 國軍【聯合情報】：下一次攻擊 +8；事件預警：${nextEventHint.title}`);
+            } else if(type==='KMT_RALLY'){
+                gameState.regions.filter(r=>r.owner==='KMT').forEach(r=>r.hp=Math.min(r.maxHp,r.hp+14));
+                changeMorale('KMT',10);
+                log('🇹🇼 國軍【守土動員】：所有國軍區域 +14 HP、士氣 +10。');
+            } else if(type==='CPC_PRESSURE'){
+                side.surge=16;
+                changeMorale('CPC',3);
+                log('CPC【縱深壓迫】：下一次攻擊 +16。');
+            } else if(type==='CPC_RESERVE'){
+                const targets=gameState.regions.filter(r=>r.owner==='CPC').sort((a,b)=>a.hp-b.hp);
+                if(targets[0]) targets[0].hp=Math.min(targets[0].maxHp,targets[0].hp+30);
+                log('CPC【後方補給】：最低 HP 的共軍區域 +30。');
+            } else if(type==='CPC_MOBILIZE'){
+                gameState.regions.filter(r=>r.owner==='CPC').forEach(r=>r.hp=Math.min(r.maxHp,r.hp+10));
+                gameState.ap=Math.min(getMaxAP('CPC'),gameState.ap+1);
+                changeMorale('CPC',6);
+                log('CPC【全線動員】：所有共軍區域 +10 HP、AP +1。');
+            } else if(type==='CPC_FORECAST'){
+                nextEventHint=getRandomEvent(true);
+                changeMorale('CPC',5);
+                log(`CPC【戰區預判】：事件預警：${nextEventHint.title}`);
             }
-
             renderMapElements();
             updateActionButtonStates();
-
-            if (gameMode === 'P2P') {
-                sendData({ type:'SKILL', skill:type, gameState, specialState, msg:`對手使用特殊技能 ${type}` });
-            }
+            if(gameMode==='P2P') sendData({type:'SKILL',skill:type,gameState,specialState,hqState,msg:`${myRole} 使用專屬技能 ${type}`});
         }
 
         const emergencyEvents = [
@@ -906,6 +924,19 @@
                     gameState.regions.filter(r=>r.owner===myRole).forEach(r=>r.hp=Math.min(r.maxHp,r.hp+8));
                     log('事件選擇 B：分散備援，所有己方區域 +8 HP。');
                 }}
+            }
+,
+            {
+                title:'🔥 高壓危機：兩害取其輕',
+                desc:'前線同時出現補給壓力與指揮混亂。選擇一項代價較大的處置。',
+                a:{text:'A：穩住前線 -10 HP，AP +1', fn:()=>{ const r=gameState.regions.find(x=>x.owner===myRole); if(r) r.hp=Math.max(1,r.hp-10); gameState.ap=Math.min(getMaxAP(myRole),gameState.ap+1); log('高壓危機 A：前線承受壓力，換取額外 AP。'); }},
+                b:{text:'B：保留 AP，士氣 -8、全線 -5 HP', fn:()=>{ gameState.regions.filter(r=>r.owner===myRole).forEach(r=>r.hp=Math.max(1,r.hp-5)); changeMorale(myRole,-8); log('高壓危機 B：保存行動力，但全線承受損耗。'); }}
+            },
+            {
+                title:'🌪️ 戰區震盪：前線失序',
+                desc:'局勢突然惡化。你可以集中資源保住一個核心區域，或讓所有區域分擔損失。',
+                a:{text:'A：核心防守 +20 HP，其餘 -8 HP', fn:()=>{ const core=gameState.regions.find(x=>x.owner===myRole&&x.id=== (myRole==='KMT'?'taiwan':'north')); if(core) core.hp=Math.min(core.maxHp,core.hp+20); gameState.regions.filter(r=>r.owner===myRole&&r!==core).forEach(r=>r.hp=Math.max(1,r.hp-8)); changeMorale(myRole,3); log('戰區震盪 A：核心區域獲得集中支援。'); }},
+                b:{text:'B：平均分配，所有己方 +5 HP，但失去 1 AP', fn:()=>{ gameState.regions.filter(r=>r.owner===myRole).forEach(r=>r.hp=Math.min(r.maxHp,r.hp+5)); gameState.ap=Math.max(0,gameState.ap-1); log('戰區震盪 B：平均分配資源，AP -1。'); }}
             }
         ];
 
