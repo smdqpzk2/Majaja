@@ -13,6 +13,51 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.5/peerjs.min.js"></script>
 
     <style>
+        /* 地圖中央任務覆蓋層 */
+        #map-container { position:relative; }
+        #map-event-overlay {
+            display:none;
+            position:absolute;
+            left:50%;
+            top:50%;
+            transform:translate(-50%,-50%);
+            width:min(88%, 560px);
+            z-index:2000;
+            padding:18px;
+            border:2px solid var(--gold-accent);
+            border-radius:12px;
+            background:rgba(5,10,18,.94);
+            box-shadow:0 0 0 1px rgba(255,215,0,.15), 0 0 28px rgba(255,215,0,.35);
+            backdrop-filter:blur(6px);
+            text-align:center;
+            pointer-events:auto;
+        }
+        #map-event-overlay::before {
+            content:"";
+            position:absolute; inset:0; border-radius:12px;
+            pointer-events:none;
+            background:linear-gradient(90deg,transparent,rgba(255,215,0,.07),transparent);
+            animation:missionScan 2.2s linear infinite;
+        }
+        .map-event-tag {
+            position:relative;
+            font-size:.65rem; letter-spacing:.16em;
+            color:var(--gold-accent); font-weight:800;
+            margin-bottom:7px;
+        }
+        .map-event-title,.map-event-desc,.map-event-choices { position:relative; }
+        .map-event-title { font-size:1.15rem; font-weight:800; color:#fff; margin-bottom:6px; }
+        .map-event-desc { font-size:.78rem; line-height:1.5; color:#cbd5e1; margin-bottom:12px; }
+        .map-event-choices { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .map-event-choices .event-choice { margin:0; min-height:44px; }
+        @keyframes missionScan {
+            from { transform:translateX(-100%); }
+            to { transform:translateX(100%); }
+        }
+        @media(max-width:600px){
+            #map-event-overlay { width:calc(100% - 24px); padding:14px; }
+            .map-event-choices { grid-template-columns:1fr; }
+        }
         :root {
             --bg-dark: #070a0e;
             --panel-bg: rgba(13, 19, 28, 0.92);
@@ -234,7 +279,7 @@
 
     <header>
         <div class="title-group">
-            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局V4：<span>攻佔戰術地圖</span></h1>
+            <h1><i class="fa-solid fa-satellite-dish"></i> 大戰局V5：<span>反攻戰術地圖</span></h1>
             <div class="subtitle">完全靜態鎖定 / 50% 畫面視角</div>
         </div>
         <div class="mode-selector">
@@ -933,6 +978,23 @@
             const choices = document.getElementById('event-choices');
             choices.innerHTML = '';
 
+            // 同步把一般緊急任務顯示在地圖中央
+            const mapOverlay = document.getElementById('map-event-overlay');
+            if (mapOverlay) {
+                document.getElementById('map-event-title').textContent = event.title;
+                document.getElementById('map-event-desc').textContent = event.desc;
+                const mapChoices = document.getElementById('map-event-choices');
+                mapChoices.innerHTML = '';
+                [event.a, event.b].forEach(choice => {
+                    const btn = document.createElement('button');
+                    btn.className = 'event-choice';
+                    btn.textContent = choice.text;
+                    btn.addEventListener('click', () => resolveEmergencyEvent(event, choice));
+                    mapChoices.appendChild(btn);
+                });
+                mapOverlay.style.display = 'block';
+            }
+
             const a = document.createElement('button');
             a.className = 'event-choice'; a.textContent = event.a.text;
             a.onclick = () => resolveEmergencyEvent(event, event.a);
@@ -949,6 +1011,8 @@
         function resolveEmergencyEvent(event, choice) {
             choice.fn();
             pendingEvent = false;
+            const mapOverlay = document.getElementById('map-event-overlay');
+            if (mapOverlay) mapOverlay.style.display = 'none';
             document.getElementById('event-banner').style.display = 'none';
             updateActionButtonStates();
 
